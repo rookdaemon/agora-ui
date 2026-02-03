@@ -14,6 +14,7 @@ export class RelayClient {
   onMessage?: (from: string, envelope: MessageEnvelope) => void;
   onPeerOnline?: (publicKey: string) => void;
   onPeerOffline?: (publicKey: string) => void;
+  onPeers?: (publicKeys: string[]) => void;
   onError?: (error: string) => void;
 
   constructor(url: string, publicKey: string) {
@@ -66,6 +67,12 @@ export class RelayClient {
 
   private handleMessage(message: RelayMessage): void {
     switch (message.type) {
+      case 'registered':
+        // Handle initial peers list from registration
+        if (message.peers && Array.isArray(message.peers)) {
+          this.onPeers?.(message.peers);
+        }
+        break;
       case 'message':
         if (message.from && message.envelope) {
           this.onMessage?.(message.from, message.envelope);

@@ -18,13 +18,14 @@ export interface Message {
 }
 
 export interface RelayMessage {
-  type: 'register' | 'message' | 'error' | 'peer_online' | 'peer_offline';
+  type: 'register' | 'registered' | 'message' | 'error' | 'peer_online' | 'peer_offline';
   publicKey?: string;
   to?: string;
   from?: string;
   envelope?: MessageEnvelope;
   code?: string;
   message?: string;
+  peers?: string[];
 }
 
 export interface MessageEnvelope {

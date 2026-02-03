@@ -44,6 +44,20 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       ]);
     };
 
+    client.onPeers = (peerKeys) => {
+      // Initial peers list from registration
+      setPeers((prev) => {
+        const newPeers = new Map(prev);
+        for (const peerKey of peerKeys) {
+          newPeers.set(peerKey, peerKey.slice(0, 8));
+        }
+        return newPeers;
+      });
+      if (peerKeys.length > 0) {
+        addSystemMessage(`${peerKeys.length} peer(s) online`);
+      }
+    };
+
     client.onPeerOnline = (peerKey) => {
       setPeers((prev) => {
         const newPeers = new Map(prev);
