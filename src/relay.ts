@@ -109,6 +109,17 @@ export class RelayClient {
     this.send(message);
   }
 
+  broadcast(text: string): void {
+    const message: RelayMessage = {
+      type: 'broadcast' as any,
+      envelope: {
+        text,
+        timestamp: Date.now()
+      }
+    };
+    this.send(message);
+  }
+
   private send(message: RelayMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));

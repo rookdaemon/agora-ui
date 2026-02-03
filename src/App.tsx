@@ -183,31 +183,16 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       return;
     }
 
-    // Broadcast or single peer
+    // Broadcast to all peers
     if (peers.size === 0) {
       addSystemMessage('No peers online to send message to');
-    } else if (peers.size === 1) {
-      // Send to the only peer
-      const [peerKey] = Array.from(peers.keys());
-      relay?.sendMessage(peerKey, value);
-      setMessages((prev) => [
-        ...prev,
-        {
-          from: publicKey,
-          text: value,
-          timestamp: Date.now(),
-          isDM: false
-        }
-      ]);
     } else {
-      // Broadcast to all peers
-      peers.forEach((_, peerKey) => {
-        relay?.sendMessage(peerKey, value);
-      });
+      // Use relay broadcast - one message to everyone
+      relay?.broadcast(value);
       setMessages((prev) => [
         ...prev,
         {
-          from: publicKey,
+          from: username,
           text: value,
           timestamp: Date.now(),
           isDM: false
