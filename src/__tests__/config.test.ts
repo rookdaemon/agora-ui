@@ -37,7 +37,7 @@ describe('Config Loading', () => {
 
     expect(loaded.identity.publicKey).toBe(config.identity.publicKey);
     expect(loaded.identity.privateKey).toBe(config.identity.privateKey);
-    expect(loaded.relay?.url).toBe(config.relay.url);
+    expect(loaded.relay?.url).toBe(config.relay?.url);
   });
 
   it('should throw error for missing config file', () => {
