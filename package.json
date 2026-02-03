@@ -1,6 +1,6 @@
 {
   "name": "@rookdaemon/agora-ui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Terminal chat interface for Agora peer-to-peer messaging",
   "main": "dist/index.js",
