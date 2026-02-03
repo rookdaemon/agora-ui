@@ -7,6 +7,12 @@
   "bin": {
     "agora-ui": "dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/cli.js",
