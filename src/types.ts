@@ -17,15 +17,21 @@ export interface Message {
   isDM?: boolean;
 }
 
+export interface PeerInfo {
+  publicKey: string;
+  name?: string;
+}
+
 export interface RelayMessage {
   type: 'register' | 'registered' | 'message' | 'error' | 'peer_online' | 'peer_offline';
   publicKey?: string;
+  name?: string;
   to?: string;
   from?: string;
   envelope?: MessageEnvelope;
   code?: string;
   message?: string;
-  peers?: string[];
+  peers?: PeerInfo[];
 }
 
 export interface MessageEnvelope {

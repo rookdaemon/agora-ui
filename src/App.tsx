@@ -21,7 +21,7 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
   const [relay, setRelay] = useState<RelayClient | null>(null);
 
   useEffect(() => {
-    const client = new RelayClient(relayUrl, publicKey);
+    const client = new RelayClient(relayUrl, publicKey, username);
 
     client.onStatusChange = (newStatus) => {
       setStatus(newStatus);
@@ -32,11 +32,12 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       }
     };
 
-    client.onMessage = (from, envelope) => {
+    client.onMessage = (from, fromName, envelope) => {
+      const displayName = fromName || from.slice(0, 8);
       setMessages((prev) => [
         ...prev,
         {
-          from,
+          from: displayName,
           text: envelope.text,
           timestamp: envelope.timestamp,
           isDM: false
@@ -44,36 +45,38 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       ]);
     };
 
-    client.onPeers = (peerKeys) => {
+    client.onPeers = (peerInfos) => {
       // Initial peers list from registration
       setPeers((prev) => {
         const newPeers = new Map(prev);
-        for (const peerKey of peerKeys) {
-          newPeers.set(peerKey, peerKey.slice(0, 8));
+        for (const peer of peerInfos) {
+          newPeers.set(peer.publicKey, peer.name || peer.publicKey.slice(0, 8));
         }
         return newPeers;
       });
-      if (peerKeys.length > 0) {
-        addSystemMessage(`${peerKeys.length} peer(s) online`);
+      if (peerInfos.length > 0) {
+        addSystemMessage(`${peerInfos.length} peer(s) online`);
       }
     };
 
-    client.onPeerOnline = (peerKey) => {
+    client.onPeerOnline = (peerKey, peerName) => {
+      const displayName = peerName || peerKey.slice(0, 8);
       setPeers((prev) => {
         const newPeers = new Map(prev);
-        newPeers.set(peerKey, peerKey.slice(0, 8));
+        newPeers.set(peerKey, displayName);
         return newPeers;
       });
-      addSystemMessage(`Peer ${peerKey.slice(0, 8)} came online`);
+      addSystemMessage(`${displayName} came online`);
     };
 
-    client.onPeerOffline = (peerKey) => {
+    client.onPeerOffline = (peerKey, peerName) => {
       setPeers((prev) => {
+        const displayName = peerName || prev.get(peerKey) || peerKey.slice(0, 8);
         const newPeers = new Map(prev);
         newPeers.delete(peerKey);
+        addSystemMessage(`${displayName} went offline`);
         return newPeers;
       });
-      addSystemMessage(`Peer ${peerKey.slice(0, 8)} went offline`);
     };
 
     client.onError = (error) => {

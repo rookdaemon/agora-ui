@@ -1,25 +1,27 @@
 import WebSocket from 'ws';
-import type { RelayMessage, MessageEnvelope, ConnectionStatus } from './types.js';
+import type { RelayMessage, MessageEnvelope, ConnectionStatus, PeerInfo } from './types.js';
 
 export class RelayClient {
   private ws: WebSocket | null = null;
   private url: string;
   private publicKey: string;
+  private name?: string;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private shouldReconnect = true;
   
   onStatusChange?: (status: ConnectionStatus) => void;
-  onMessage?: (from: string, envelope: MessageEnvelope) => void;
-  onPeerOnline?: (publicKey: string) => void;
-  onPeerOffline?: (publicKey: string) => void;
-  onPeers?: (publicKeys: string[]) => void;
+  onMessage?: (from: string, fromName: string | undefined, envelope: MessageEnvelope) => void;
+  onPeerOnline?: (publicKey: string, name?: string) => void;
+  onPeerOffline?: (publicKey: string, name?: string) => void;
+  onPeers?: (peers: PeerInfo[]) => void;
   onError?: (error: string) => void;
 
-  constructor(url: string, publicKey: string) {
+  constructor(url: string, publicKey: string, name?: string) {
     this.url = url;
     this.publicKey = publicKey;
+    this.name = name;
   }
 
   connect(): void {
@@ -60,7 +62,8 @@ export class RelayClient {
   private register(): void {
     const message: RelayMessage = {
       type: 'register',
-      publicKey: this.publicKey
+      publicKey: this.publicKey,
+      name: this.name
     };
     this.send(message);
   }
@@ -75,17 +78,17 @@ export class RelayClient {
         break;
       case 'message':
         if (message.from && message.envelope) {
-          this.onMessage?.(message.from, message.envelope);
+          this.onMessage?.(message.from, message.name, message.envelope);
         }
         break;
       case 'peer_online':
         if (message.publicKey) {
-          this.onPeerOnline?.(message.publicKey);
+          this.onPeerOnline?.(message.publicKey, message.name);
         }
         break;
       case 'peer_offline':
         if (message.publicKey) {
-          this.onPeerOffline?.(message.publicKey);
+          this.onPeerOffline?.(message.publicKey, message.name);
         }
         break;
       case 'error':
