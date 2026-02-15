@@ -22,21 +22,4 @@ export interface PeerInfo {
   name?: string;
 }
 
-export interface RelayMessage {
-  type: 'register' | 'registered' | 'message' | 'error' | 'peer_online' | 'peer_offline';
-  publicKey?: string;
-  name?: string;
-  to?: string;
-  from?: string;
-  envelope?: MessageEnvelope;
-  code?: string;
-  message?: string;
-  peers?: PeerInfo[];
-}
-
-export interface MessageEnvelope {
-  text: string;
-  timestamp: number;
-}
-
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';

@@ -1,30 +1,21 @@
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import type { AgoraConfig } from './types.js';
+import { loadAgoraConfig, getDefaultConfigPath } from '@rookdaemon/agora';
+import type { AgoraConfig as AgoraConfigLoaded } from '@rookdaemon/agora';
 
-export function loadConfig(configPath?: string): AgoraConfig {
-  const path = configPath || join(homedir(), '.config', 'agora', 'config.json');
-  
-  if (!existsSync(path)) {
-    throw new Error(`Config file not found at ${path}. Run 'npx @rookdaemon/agora init' first.`);
-  }
+/** Config shape used by the UI (identity + optional relay URL). */
+export type AgoraConfig = Pick<AgoraConfigLoaded, 'identity'> & {
+  relay?: { url: string };
+};
 
-  try {
-    const content = readFileSync(path, 'utf-8');
-    const config = JSON.parse(content) as AgoraConfig;
-
-    if (!config.identity || !config.identity.publicKey) {
-      throw new Error('Invalid config: missing identity.publicKey');
-    }
-
-    return config;
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`Invalid JSON in config file: ${path}`);
-    }
-    throw error;
-  }
+/**
+ * Load Agora config using canonical loader from @rookdaemon/agora.
+ */
+export function loadConfig(configPath?: string): AgoraConfig & { identity: { publicKey: string; privateKey: string } } {
+  const path = configPath ?? getDefaultConfigPath();
+  const config = loadAgoraConfig(path);
+  return {
+    identity: config.identity,
+    relay: config.relay ? { url: config.relay.url } : undefined,
+  };
 }
 
 export function getRelayUrl(config: AgoraConfig, cliRelay?: string): string {

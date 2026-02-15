@@ -35,6 +35,7 @@ function main() {
       React.createElement(App, {
         relayUrl,
         publicKey: config.identity.publicKey,
+        privateKey: config.identity.privateKey,
         username
       })
     );

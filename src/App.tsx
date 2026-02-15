@@ -1,110 +1,123 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useApp } from 'ink';
+import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
-import { RelayClient } from './relay.js';
 import type { Message, ConnectionStatus } from './types.js';
 
 interface AppProps {
   relayUrl: string;
   publicKey: string;
+  privateKey: string;
   username: string;
 }
 
-export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
+function extractTextFromPayload(payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'text' in payload && typeof (payload as { text: unknown }).text === 'string') {
+    return (payload as { text: string }).text;
+  }
+  if (typeof payload === 'string') return payload;
+  return JSON.stringify(payload ?? '');
+}
+
+export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JSX.Element {
   const { exit } = useApp();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [peers, setPeers] = useState<Map<string, string>>(new Map());
-  const [relay, setRelay] = useState<RelayClient | null>(null);
+  const relayRef = useRef<RelayClient | null>(null);
 
   useEffect(() => {
-    const client = new RelayClient(relayUrl, publicKey, username);
+    const client = new RelayClient({
+      relayUrl,
+      publicKey,
+      privateKey,
+      name: username,
+    });
 
-    client.onStatusChange = (newStatus) => {
-      setStatus(newStatus);
-      if (newStatus === 'connected') {
-        addSystemMessage('Connected to relay');
-      } else if (newStatus === 'disconnected') {
-        addSystemMessage('Disconnected from relay');
+    client.on('connected', () => {
+      setStatus('connected');
+      setMessages((prev) => [...prev, { from: 'system', text: 'Connected to relay', timestamp: Date.now(), isDM: false }]);
+      const online = client.getOnlinePeers();
+      setPeers((prev) => {
+        const next = new Map(prev);
+        for (const p of online) {
+          next.set(p.publicKey, p.name ?? p.publicKey.slice(0, 8));
+        }
+        return next;
+      });
+      if (online.length > 0) {
+        setMessages((prev) => [...prev, { from: 'system', text: `${online.length} peer(s) online`, timestamp: Date.now(), isDM: false }]);
       }
-    };
+    });
 
-    client.onMessage = (from, fromName, envelope) => {
-      const displayName = fromName || from.slice(0, 8);
+    client.on('disconnected', () => {
+      setStatus('disconnected');
+      setMessages((prev) => [...prev, { from: 'system', text: 'Disconnected from relay', timestamp: Date.now(), isDM: false }]);
+    });
+
+    client.on('message', (envelope, from, fromName) => {
+      const displayName = fromName ?? from.slice(0, 8);
+      const text = extractTextFromPayload(envelope.payload);
       setMessages((prev) => [
         ...prev,
         {
           from: displayName,
-          text: envelope.text,
+          text,
           timestamp: envelope.timestamp,
-          isDM: false
-        }
+          isDM: false,
+        },
       ]);
-    };
+    });
 
-    client.onPeers = (peerInfos) => {
-      // Initial peers list from registration
+    client.on('peer_online', (peer) => {
+      const displayName = peer.name ?? peer.publicKey.slice(0, 8);
       setPeers((prev) => {
-        const newPeers = new Map(prev);
-        for (const peer of peerInfos) {
-          newPeers.set(peer.publicKey, peer.name || peer.publicKey.slice(0, 8));
-        }
-        return newPeers;
+        const next = new Map(prev);
+        next.set(peer.publicKey, displayName);
+        return next;
       });
-      if (peerInfos.length > 0) {
-        addSystemMessage(`${peerInfos.length} peer(s) online`);
-      }
-    };
+      setMessages((prev) => [...prev, { from: 'system', text: `${displayName} came online`, timestamp: Date.now(), isDM: false }]);
+    });
 
-    client.onPeerOnline = (peerKey, peerName) => {
-      const displayName = peerName || peerKey.slice(0, 8);
+    client.on('peer_offline', (peer) => {
+      const displayName = peer.name ?? peer.publicKey.slice(0, 8);
       setPeers((prev) => {
-        const newPeers = new Map(prev);
-        newPeers.set(peerKey, displayName);
-        return newPeers;
+        const next = new Map(prev);
+        next.delete(peer.publicKey);
+        return next;
       });
-      addSystemMessage(`${displayName} came online`);
-    };
+      setMessages((prev) => [...prev, { from: 'system', text: `${displayName} went offline`, timestamp: Date.now(), isDM: false }]);
+    });
 
-    client.onPeerOffline = (peerKey, peerName) => {
-      setPeers((prev) => {
-        const displayName = peerName || prev.get(peerKey) || peerKey.slice(0, 8);
-        const newPeers = new Map(prev);
-        newPeers.delete(peerKey);
-        addSystemMessage(`${displayName} went offline`);
-        return newPeers;
-      });
-    };
+    client.on('error', (err: Error) => {
+      setMessages((prev) => [
+        ...prev,
+        { from: 'system', text: `Error: ${err.message}`, timestamp: Date.now(), isDM: false },
+      ]);
+    });
 
-    client.onError = (error) => {
-      addSystemMessage(`Error: ${error}`);
-    };
-
+    relayRef.current = client;
     client.connect();
-    setRelay(client);
 
     return () => {
       client.disconnect();
+      relayRef.current = null;
     };
-  }, [relayUrl, publicKey]);
+  }, [relayUrl, publicKey, privateKey, username]);
 
   const addSystemMessage = (text: string) => {
     setMessages((prev) => [
       ...prev,
-      {
-        from: 'system',
-        text,
-        timestamp: Date.now(),
-        isDM: false
-      }
+      { from: 'system', text, timestamp: Date.now(), isDM: false },
     ]);
   };
 
   const handleCommand = (command: string): boolean => {
     const cmd = command.toLowerCase();
+    const relay = relayRef.current;
 
     if (cmd === '/quit' || cmd === '/exit') {
       relay?.disconnect();
@@ -148,33 +161,38 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       return;
     }
 
-    // Check if it's a command
     if (value.startsWith('/')) {
       handleCommand(value);
       setInputValue('');
       return;
     }
 
-    // Check for DM (@peer message)
+    const relay = relayRef.current;
+    if (!relay?.connected()) {
+      addSystemMessage('Not connected to relay');
+      setInputValue('');
+      return;
+    }
+
     const dmMatch = value.match(/^@(\S+)\s+(.+)$/);
     if (dmMatch) {
       const [, peerName, text] = dmMatch;
-      // Find peer by name prefix
-      const peerEntry = Array.from(peers.entries()).find(([key, name]) => 
-        name.startsWith(peerName) || key.startsWith(peerName)
+      const peerEntry = Array.from(peers.entries()).find(
+        ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
       );
 
       if (peerEntry) {
         const [peerKey] = peerEntry;
-        relay?.sendMessage(peerKey, text);
+        const envelope = createEnvelope('publish', publicKey, privateKey, { text });
+        relay.send(peerKey, envelope);
         setMessages((prev) => [
           ...prev,
           {
             from: publicKey,
             text: `@${peerName}: ${text}`,
             timestamp: Date.now(),
-            isDM: true
-          }
+            isDM: true,
+          },
         ]);
       } else {
         addSystemMessage(`Peer '${peerName}' not found`);
@@ -183,20 +201,19 @@ export function App({ relayUrl, publicKey, username }: AppProps): JSX.Element {
       return;
     }
 
-    // Broadcast to all peers
     if (peers.size === 0) {
       addSystemMessage('No peers online to send message to');
     } else {
-      // Use relay broadcast - one message to everyone
-      relay?.broadcast(value);
+      const envelope = createEnvelope('publish', publicKey, privateKey, { text: value });
+      relay.broadcast(envelope);
       setMessages((prev) => [
         ...prev,
         {
           from: username,
           text: value,
           timestamp: Date.now(),
-          isDM: false
-        }
+          isDM: false,
+        },
       ]);
     }
 
