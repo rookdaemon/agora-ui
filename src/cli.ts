@@ -3,6 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { loadConfig, getRelayUrl } from './config.js';
+import { shortKey } from '@rookdaemon/agora';
 
 function parseArgs(): { relay?: string; config?: string; name?: string } {
   const args = process.argv.slice(2);
@@ -29,7 +30,7 @@ function main() {
     const { relay: cliRelay, config: configPath, name: cliName } = parseArgs();
     const config = loadConfig(configPath);
     const relayUrl = getRelayUrl(config, cliRelay);
-    const username = cliName || config.identity.publicKey.slice(0, 8);
+    const username = cliName || shortKey(config.identity.publicKey);
 
     render(
       React.createElement(App, {

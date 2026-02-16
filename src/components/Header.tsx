@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { shortKey } from '@rookdaemon/agora';
 import type { ConnectionStatus } from '../types.js';
 
 interface HeaderProps {
@@ -10,7 +11,7 @@ interface HeaderProps {
 }
 
 export function Header({ status, username, publicKey, onlinePeers }: HeaderProps): JSX.Element {
-  const truncatedKey = publicKey.slice(0, 8) + '...';
+  const truncatedKey = shortKey(publicKey);
   
   const statusColor = status === 'connected' ? 'green' : 
                       status === 'connecting' ? 'yellow' : 'red';

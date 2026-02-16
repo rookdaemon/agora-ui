@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useApp } from 'ink';
-import { RelayClient, createEnvelope } from '@rookdaemon/agora';
+import { RelayClient, createEnvelope, shortKey } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
@@ -45,7 +45,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
       setPeers((prev) => {
         const next = new Map(prev);
         for (const p of online) {
-          next.set(p.publicKey, p.name ?? p.publicKey.slice(0, 8));
+          next.set(p.publicKey, p.name ?? shortKey(p.publicKey));
         }
         return next;
       });
@@ -60,7 +60,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('message', (envelope: Envelope, from: string, fromName?: string) => {
-      const displayName = fromName ?? from.slice(0, 8);
+      const displayName = fromName ?? shortKey(from);
       const text = extractTextFromPayload(envelope.payload);
       setMessages((prev) => [
         ...prev,
@@ -74,7 +74,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
-      const displayName = peer.name ?? peer.publicKey.slice(0, 8);
+      const displayName = peer.name ?? shortKey(peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);
         next.set(peer.publicKey, displayName);
@@ -84,7 +84,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('peer_offline', (peer: RelayPeer) => {
-      const displayName = peer.name ?? peer.publicKey.slice(0, 8);
+      const displayName = peer.name ?? shortKey(peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);
         next.delete(peer.publicKey);

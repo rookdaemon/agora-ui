@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { shortKey } from '@rookdaemon/agora';
 import type { Message } from '../types.js';
 
 interface MessageListProps {
@@ -17,8 +18,8 @@ export function MessageList({ messages, myPublicKey }: MessageListProps): JSX.El
     if (from === myPublicKey) {
       return 'You';
     }
-    // Try to get first 8 chars as username
-    return from.slice(0, 8);
+    // Use shortKey for display (last 8 chars + "...")
+    return shortKey(from);
   };
 
   return (
