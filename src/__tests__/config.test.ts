@@ -27,6 +27,7 @@ describe('Config Loading', () => {
         publicKey: '302a300506032b657003210012345678',
         privateKey: 'private123'
       },
+      peers: {},
       relay: {
         url: 'wss://test-relay.example.com'
       }
@@ -59,6 +60,7 @@ describe('Relay URL Resolution', () => {
   it('should use CLI relay if provided', () => {
     const config: AgoraConfig = {
       identity: { publicKey: '123', privateKey: '456' },
+      peers: {},
       relay: { url: 'wss://config-relay.com' }
     };
     const url = getRelayUrl(config, 'wss://cli-relay.com');
@@ -68,6 +70,7 @@ describe('Relay URL Resolution', () => {
   it('should use config relay if no CLI relay', () => {
     const config: AgoraConfig = {
       identity: { publicKey: '123', privateKey: '456' },
+      peers: {},
       relay: { url: 'wss://config-relay.com' }
     };
     const url = getRelayUrl(config);
@@ -76,7 +79,8 @@ describe('Relay URL Resolution', () => {
 
   it('should use default relay if none provided', () => {
     const config: AgoraConfig = {
-      identity: { publicKey: '123', privateKey: '456' }
+      identity: { publicKey: '123', privateKey: '456' },
+      peers: {}
     };
     const url = getRelayUrl(config);
     expect(url).toBe('wss://agora-relay.lbsa71.net');

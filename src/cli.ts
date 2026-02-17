@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { loadConfig, getRelayUrl } from './config.js';
-import { shortKey } from '@rookdaemon/agora';
+import { loadAgoraConfig, resolveBroadcastName, formatDisplayName } from '@rookdaemon/agora';
 
 function parseArgs(): { relay?: string; config?: string; name?: string } {
   const args = process.argv.slice(2);
@@ -30,14 +30,23 @@ function main() {
     const { relay: cliRelay, config: configPath, name: cliName } = parseArgs();
     const config = loadConfig(configPath);
     const relayUrl = getRelayUrl(config, cliRelay);
-    const username = cliName || shortKey(config.identity.publicKey);
+    
+    // Resolve broadcast name using priority: CLI --name, config.relay.name, config.identity.name
+    // Load full config to get identity.name and relay.name if available
+    const fullConfig = loadAgoraConfig(configPath);
+    const broadcastName = resolveBroadcastName(fullConfig, cliName);
+    
+    // Format username for display: "name (...3f8c2247)" or "...3f8c2247"
+    const username = formatDisplayName(broadcastName, config.identity.publicKey);
 
     render(
       React.createElement(App, {
         relayUrl,
         publicKey: config.identity.publicKey,
         privateKey: config.identity.privateKey,
-        username
+        username,
+        broadcastName,
+        configPeers: config.peers,
       })
     );
   } catch (error) {

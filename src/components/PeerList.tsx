@@ -12,11 +12,10 @@ export function PeerList({ peers }: PeerListProps): JSX.Element {
     <Box flexDirection="column" paddingX={1}>
       <Text bold underline>Online Peers:</Text>
       {peerArray.length > 0 ? (
-        peerArray.map(([pubkey, name]) => (
+        peerArray.map(([pubkey, displayName]) => (
           <Box key={pubkey}>
             <Text color="green">• </Text>
-            <Text bold>{name}</Text>
-            <Text dimColor> ({pubkey})</Text>
+            <Text bold>{displayName}</Text>
           </Box>
         ))
       ) : (

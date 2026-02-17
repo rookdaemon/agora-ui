@@ -1,14 +1,15 @@
+import type { AgoraConfig as AgoraConfigLoaded } from '@rookdaemon/agora';
+
 export interface Identity {
   publicKey: string;
   privateKey: string;
 }
 
-export interface AgoraConfig {
-  identity: Identity;
+export type AgoraConfig = Pick<AgoraConfigLoaded, 'identity' | 'peers'> & {
   relay?: {
     url: string;
   };
-}
+};
 
 export interface Message {
   from: string;

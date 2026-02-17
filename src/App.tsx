@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useApp } from 'ink';
-import { RelayClient, createEnvelope, shortKey } from '@rookdaemon/agora';
+import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
+import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
+import { resolveDisplayName, formatDisplayName } from './utils.js';
 import type { Message, ConnectionStatus } from './types.js';
 
 interface AppProps {
@@ -12,6 +14,8 @@ interface AppProps {
   publicKey: string;
   privateKey: string;
   username: string;
+  broadcastName?: string;
+  configPeers: Record<string, AgoraPeerConfig>;
 }
 
 function extractTextFromPayload(payload: unknown): string {
@@ -22,7 +26,7 @@ function extractTextFromPayload(payload: unknown): string {
   return JSON.stringify(payload ?? '');
 }
 
-export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JSX.Element {
+export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers }: AppProps): JSX.Element {
   const { exit } = useApp();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -35,7 +39,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
       relayUrl,
       publicKey,
       privateKey,
-      name: username,
+      name: broadcastName,
     });
 
     client.on('connected', () => {
@@ -45,7 +49,10 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
       setPeers((prev) => {
         const next = new Map(prev);
         for (const p of online) {
-          next.set(p.publicKey, p.name ?? shortKey(p.publicKey));
+          // Resolve display name using priority: config.peers[publicKey].name, peer.name
+          const resolvedName = resolveDisplayName(p.publicKey, p.name, configPeers);
+          const displayName = formatDisplayName(resolvedName, p.publicKey);
+          next.set(p.publicKey, displayName);
         }
         return next;
       });
@@ -60,7 +67,9 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('message', (envelope: Envelope, from: string, fromName?: string) => {
-      const displayName = fromName ?? shortKey(from);
+      // Resolve display name using priority: config.peers[publicKey].name, peer.name
+      const resolvedName = resolveDisplayName(from, fromName, configPeers);
+      const displayName = formatDisplayName(resolvedName, from);
       const text = extractTextFromPayload(envelope.payload);
       setMessages((prev) => [
         ...prev,
@@ -74,7 +83,9 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
-      const displayName = peer.name ?? shortKey(peer.publicKey);
+      // Resolve display name using priority: config.peers[publicKey].name, peer.name
+      const resolvedName = resolveDisplayName(peer.publicKey, peer.name, configPeers);
+      const displayName = formatDisplayName(resolvedName, peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);
         next.set(peer.publicKey, displayName);
@@ -84,7 +95,9 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     });
 
     client.on('peer_offline', (peer: RelayPeer) => {
-      const displayName = peer.name ?? shortKey(peer.publicKey);
+      // Resolve display name using priority: config.peers[publicKey].name, peer.name
+      const resolvedName = resolveDisplayName(peer.publicKey, peer.name, configPeers);
+      const displayName = formatDisplayName(resolvedName, peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);
         next.delete(peer.publicKey);
@@ -107,7 +120,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
       client.disconnect();
       relayRef.current = null;
     };
-  }, [relayUrl, publicKey, privateKey, username]);
+  }, [relayUrl, publicKey, privateKey, broadcastName, configPeers]);
 
   const addSystemMessage = (text: string) => {
     setMessages((prev) => [
@@ -186,10 +199,11 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
         const [peerKey] = peerEntry;
         const envelope = createEnvelope('publish', publicKey, privateKey, { text });
         relay.send(peerKey, envelope);
+        const ownDisplayName = formatDisplayName(broadcastName, publicKey);
         setMessages((prev) => [
           ...prev,
           {
-            from: publicKey,
+            from: ownDisplayName,
             text: `@${peerName}: ${text}`,
             timestamp: Date.now(),
             isDM: true,
@@ -207,10 +221,12 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
     } else {
       const envelope = createEnvelope('publish', publicKey, privateKey, { text: value });
       relay.broadcast(envelope);
+      // Use formatted username for own messages
+      const ownDisplayName = formatDisplayName(broadcastName, publicKey);
       setMessages((prev) => [
         ...prev,
         {
-          from: username,
+          from: ownDisplayName,
           text: value,
           timestamp: Date.now(),
           isDM: false,
@@ -232,7 +248,7 @@ export function App({ relayUrl, publicKey, privateKey, username }: AppProps): JS
         onlinePeers={onlinePeerNames}
       />
       <Box marginY={1}>
-        <MessageList messages={messages} myPublicKey={publicKey} />
+        <MessageList messages={messages} myPublicKey={publicKey} myDisplayName={formatDisplayName(broadcastName, publicKey)} />
       </Box>
       <Input
         value={inputValue}
