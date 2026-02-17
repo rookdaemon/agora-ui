@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { loadConfig, getRelayUrl } from './config.js';
-import { loadAgoraConfig, resolveBroadcastName, formatDisplayName } from '@rookdaemon/agora';
+import { loadAgoraConfig, resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
 
 function parseArgs(): { relay?: string; config?: string; name?: string } {
   const args = process.argv.slice(2);
@@ -34,8 +34,11 @@ function main() {
     // Resolve broadcast name using priority: CLI --name, config.relay.name, config.identity.name
     // Load full config to get identity.name and relay.name if available
     const fullConfig = loadAgoraConfig(configPath);
-    const broadcastName = resolveBroadcastName(fullConfig, cliName);
-    
+    let broadcastName = resolveBroadcastName(fullConfig, cliName);
+    // Never use the short key (id) as the relay display name
+    if (broadcastName && broadcastName === shortKey(config.identity.publicKey)) {
+      broadcastName = undefined;
+    }
     // Format username for display: "name (...3f8c2247)" or "...3f8c2247"
     const username = formatDisplayName(broadcastName, config.identity.publicKey);
 
