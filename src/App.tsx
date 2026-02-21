@@ -91,8 +91,8 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         timestamp: envelope.timestamp,
         isDM: false,
       };
-      appendToConversation(msg, conversationPath);
       setChatMessages(prev => [...prev, msg].slice(-MAX_CONVERSATION_LINES));
+      try { appendToConversation(msg, conversationPath); } catch {}
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
