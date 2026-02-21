@@ -3,7 +3,7 @@ import React from 'react';
 import { render } from 'ink';
 import { App } from './App.js';
 import { loadConfig, getRelayUrl } from './config.js';
-import { loadAgoraConfig, resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
+import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
 
@@ -47,8 +47,7 @@ function main() {
     const relayUrl = getRelayUrl(config, cliRelay);
     
     // Resolve broadcast name using priority: CLI --name, .env AGORA_UI_NAME, config.relay.name, config.identity.name
-    const fullConfig = loadAgoraConfig(configPath);
-    let broadcastName = resolveBroadcastName(fullConfig, cliName);
+    let broadcastName = resolveBroadcastName(config as Parameters<typeof resolveBroadcastName>[0], cliName);
     // Never use the short key (id) as the relay display name
     if (broadcastName && broadcastName === shortKey(config.identity.publicKey)) {
       broadcastName = undefined;
