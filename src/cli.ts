@@ -4,10 +4,12 @@ import { render } from 'ink';
 import { App } from './App.js';
 import { loadConfig, getRelayUrl } from './config.js';
 import { loadAgoraConfig, resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
+import { loadEnv } from './env.js';
+import { getConversationPath } from './conversation.js';
 
-function parseArgs(): { relay?: string; config?: string; name?: string } {
+function parseArgs(): { relay?: string; config?: string; name?: string; storageDir?: string } {
   const args = process.argv.slice(2);
-  const result: { relay?: string; config?: string; name?: string } = {};
+  const result: { relay?: string; config?: string; name?: string; storageDir?: string } = {};
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--relay' && args[i + 1]) {
@@ -19,6 +21,9 @@ function parseArgs(): { relay?: string; config?: string; name?: string } {
     } else if (args[i] === '--name' && args[i + 1]) {
       result.name = args[i + 1];
       i++;
+    } else if (args[i] === '--storage-dir' && args[i + 1]) {
+      result.storageDir = args[i + 1];
+      i++;
     }
   }
 
@@ -27,12 +32,21 @@ function parseArgs(): { relay?: string; config?: string; name?: string } {
 
 function main() {
   try {
-    const { relay: cliRelay, config: configPath, name: cliName } = parseArgs();
+    const cliArgs = parseArgs();
+
+    // Load .env from CWD; CLI flags take precedence over .env values
+    const env = loadEnv();
+
+    // Priority: CLI > .env > default
+    const configPath = cliArgs.config ?? env.configPath;
+    const cliRelay = cliArgs.relay ?? env.relayUrl;
+    const cliName = cliArgs.name ?? env.name;
+    const storageDir = cliArgs.storageDir ?? env.storageDir;
+
     const config = loadConfig(configPath);
     const relayUrl = getRelayUrl(config, cliRelay);
     
-    // Resolve broadcast name using priority: CLI --name, config.relay.name, config.identity.name
-    // Load full config to get identity.name and relay.name if available
+    // Resolve broadcast name using priority: CLI --name, .env AGORA_UI_NAME, config.relay.name, config.identity.name
     const fullConfig = loadAgoraConfig(configPath);
     let broadcastName = resolveBroadcastName(fullConfig, cliName);
     // Never use the short key (id) as the relay display name
@@ -42,6 +56,9 @@ function main() {
     // Format username for display: "name (...3f8c2247)" or "...3f8c2247"
     const username = formatDisplayName(broadcastName, config.identity.publicKey);
 
+    // Resolve conversation file path from storage dir (CLI > .env > default agora config dir)
+    const conversationPath = getConversationPath(storageDir);
+
     render(
       React.createElement(App, {
         relayUrl,
@@ -50,6 +67,7 @@ function main() {
         username,
         broadcastName,
         configPeers: config.peers,
+        conversationPath,
       })
     );
   } catch (error) {

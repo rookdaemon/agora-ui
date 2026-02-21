@@ -7,9 +7,12 @@ export const MAX_CONVERSATION_LINES = 200;
 
 /**
  * Returns the path to the CONVERSATION.md file.
- * Located in the same directory as the agora config file.
+ * Uses storageDir if provided, otherwise falls back to the agora config directory.
  */
-export function getConversationPath(): string {
+export function getConversationPath(storageDir?: string): string {
+  if (storageDir) {
+    return join(storageDir, 'CONVERSATION.md');
+  }
   const configPath = getDefaultConfigPath();
   return join(dirname(configPath), 'CONVERSATION.md');
 }

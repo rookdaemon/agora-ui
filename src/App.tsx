@@ -17,6 +17,7 @@ interface AppProps {
   username: string;
   broadcastName?: string;
   configPeers: Record<string, AgoraPeerConfig>;
+  conversationPath?: string;
 }
 
 function extractTextFromPayload(payload: unknown): string {
@@ -27,7 +28,7 @@ function extractTextFromPayload(payload: unknown): string {
   return JSON.stringify(payload ?? '');
 }
 
-export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers }: AppProps): JSX.Element {
+export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath }: AppProps): JSX.Element {
   const { exit } = useApp();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [systemMessages, setSystemMessages] = useState<Message[]>([]);
@@ -44,8 +45,8 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
 
   // Load chat history from CONVERSATION.md on mount
   useEffect(() => {
-    setChatMessages(loadConversation());
-  }, []);
+    setChatMessages(loadConversation(conversationPath));
+  }, [conversationPath]);
 
   useEffect(() => {
     const client = new RelayClient({
@@ -90,7 +91,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         timestamp: envelope.timestamp,
         isDM: false,
       };
-      appendToConversation(msg);
+      appendToConversation(msg, conversationPath);
       setChatMessages(prev => [...prev, msg].slice(-MAX_CONVERSATION_LINES));
     });
 
@@ -219,7 +220,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
           timestamp: Date.now(),
           isDM: true,
         };
-        appendToConversation(dmMsg);
+        appendToConversation(dmMsg, conversationPath);
         setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
       } else {
         addSystemMessage(`Peer '${peerName}' not found`);
@@ -241,7 +242,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         timestamp: Date.now(),
         isDM: false,
       };
-      appendToConversation(outMsg);
+      appendToConversation(outMsg, conversationPath);
       setChatMessages(prev => [...prev, outMsg].slice(-MAX_CONVERSATION_LINES));
     }
 
