@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useApp } from 'ink';
 import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
@@ -7,6 +7,7 @@ import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
 import { resolveDisplayName, formatDisplayName } from './utils.js';
+import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
 import type { Message, ConnectionStatus } from './types.js';
 
 interface AppProps {
@@ -16,6 +17,7 @@ interface AppProps {
   username: string;
   broadcastName?: string;
   configPeers: Record<string, AgoraPeerConfig>;
+  conversationPath?: string;
 }
 
 function extractTextFromPayload(payload: unknown): string {
@@ -26,13 +28,25 @@ function extractTextFromPayload(payload: unknown): string {
   return JSON.stringify(payload ?? '');
 }
 
-export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers }: AppProps): JSX.Element {
+export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath }: AppProps): JSX.Element {
   const { exit } = useApp();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [systemMessages, setSystemMessages] = useState<Message[]>([]);
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [peers, setPeers] = useState<Map<string, string>>(new Map());
   const relayRef = useRef<RelayClient | null>(null);
+
+  // All messages sorted by timestamp for display
+  const messages = useMemo(
+    () => [...systemMessages, ...chatMessages].sort((a, b) => a.timestamp - b.timestamp),
+    [systemMessages, chatMessages]
+  );
+
+  // Load chat history from CONVERSATION.md on mount
+  useEffect(() => {
+    setChatMessages(loadConversation(conversationPath));
+  }, [conversationPath]);
 
   useEffect(() => {
     const client = new RelayClient({
@@ -44,7 +58,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
 
     client.on('connected', () => {
       setStatus('connected');
-      setMessages((prev) => [...prev, { from: 'system', text: 'Connected to relay', timestamp: Date.now(), isDM: false }]);
+      setSystemMessages((prev) => [...prev, { from: 'system', text: 'Connected to relay', timestamp: Date.now(), isDM: false }]);
       const online = client.getOnlinePeers();
       setPeers((prev) => {
         const next = new Map(prev);
@@ -57,13 +71,13 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         return next;
       });
       if (online.length > 0) {
-        setMessages((prev) => [...prev, { from: 'system', text: `${online.length} peer(s) online`, timestamp: Date.now(), isDM: false }]);
+        setSystemMessages((prev) => [...prev, { from: 'system', text: `${online.length} peer(s) online`, timestamp: Date.now(), isDM: false }]);
       }
     });
 
     client.on('disconnected', () => {
       setStatus('disconnected');
-      setMessages((prev) => [...prev, { from: 'system', text: 'Disconnected from relay', timestamp: Date.now(), isDM: false }]);
+      setSystemMessages((prev) => [...prev, { from: 'system', text: 'Disconnected from relay', timestamp: Date.now(), isDM: false }]);
     });
 
     client.on('message', (envelope: Envelope, from: string, fromName?: string) => {
@@ -71,15 +85,14 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       const resolvedName = resolveDisplayName(from, fromName, configPeers);
       const displayName = formatDisplayName(resolvedName, from);
       const text = extractTextFromPayload(envelope.payload);
-      setMessages((prev) => [
-        ...prev,
-        {
-          from: displayName,
-          text,
-          timestamp: envelope.timestamp,
-          isDM: false,
-        },
-      ]);
+      const msg: Message = {
+        from: displayName,
+        text,
+        timestamp: envelope.timestamp,
+        isDM: false,
+      };
+      appendToConversation(msg, conversationPath);
+      setChatMessages(prev => [...prev, msg].slice(-MAX_CONVERSATION_LINES));
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
@@ -91,7 +104,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         next.set(peer.publicKey, displayName);
         return next;
       });
-      setMessages((prev) => [...prev, { from: 'system', text: `${displayName} came online`, timestamp: Date.now(), isDM: false }]);
+      setSystemMessages((prev) => [...prev, { from: 'system', text: `${displayName} came online`, timestamp: Date.now(), isDM: false }]);
     });
 
     client.on('peer_offline', (peer: RelayPeer) => {
@@ -103,11 +116,11 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         next.delete(peer.publicKey);
         return next;
       });
-      setMessages((prev) => [...prev, { from: 'system', text: `${displayName} went offline`, timestamp: Date.now(), isDM: false }]);
+      setSystemMessages((prev) => [...prev, { from: 'system', text: `${displayName} went offline`, timestamp: Date.now(), isDM: false }]);
     });
 
     client.on('error', (err: Error) => {
-      setMessages((prev) => [
+      setSystemMessages((prev) => [
         ...prev,
         { from: 'system', text: `Error: ${err.message}`, timestamp: Date.now(), isDM: false },
       ]);
@@ -123,7 +136,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   }, [relayUrl, publicKey, privateKey, broadcastName, configPeers]);
 
   const addSystemMessage = (text: string) => {
-    setMessages((prev) => [
+    setSystemMessages((prev) => [
       ...prev,
       { from: 'system', text, timestamp: Date.now(), isDM: false },
     ]);
@@ -140,7 +153,8 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     }
 
     if (cmd === '/clear') {
-      setMessages([]);
+      setSystemMessages([]);
+      setChatMessages([]);
       return true;
     }
 
@@ -200,15 +214,14 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         const envelope = createEnvelope('publish', publicKey, privateKey, { text });
         relay.send(peerKey, envelope);
         const ownDisplayName = formatDisplayName(broadcastName, publicKey);
-        setMessages((prev) => [
-          ...prev,
-          {
-            from: ownDisplayName,
-            text: `@${peerName}: ${text}`,
-            timestamp: Date.now(),
-            isDM: true,
-          },
-        ]);
+        const dmMsg: Message = {
+          from: ownDisplayName,
+          text: `@${peerName}: ${text}`,
+          timestamp: Date.now(),
+          isDM: true,
+        };
+        appendToConversation(dmMsg, conversationPath);
+        setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
       } else {
         addSystemMessage(`Peer '${peerName}' not found`);
       }
@@ -223,15 +236,14 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       relay.broadcast(envelope);
       // Use formatted username for own messages
       const ownDisplayName = formatDisplayName(broadcastName, publicKey);
-      setMessages((prev) => [
-        ...prev,
-        {
-          from: ownDisplayName,
-          text: value,
-          timestamp: Date.now(),
-          isDM: false,
-        },
-      ]);
+      const outMsg: Message = {
+        from: ownDisplayName,
+        text: value,
+        timestamp: Date.now(),
+        isDM: false,
+      };
+      appendToConversation(outMsg, conversationPath);
+      setChatMessages(prev => [...prev, outMsg].slice(-MAX_CONVERSATION_LINES));
     }
 
     setInputValue('');
