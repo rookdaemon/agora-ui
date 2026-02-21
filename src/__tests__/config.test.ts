@@ -54,6 +54,22 @@ describe('Config Loading', () => {
     writeFileSync(TEST_CONFIG_PATH, JSON.stringify({}));
     expect(() => loadConfig(TEST_CONFIG_PATH)).toThrow('Invalid config');
   });
+
+  it('should handle config with non-breaking spaces', () => {
+    // Config with non-breaking spaces (U+00A0) instead of regular spaces
+    const configWithNbsp = '{\u00A0"identity":\u00A0{\u00A0"publicKey":\u00A0"302a300506032b657003210012345678",\u00A0"privateKey":\u00A0"private123"\u00A0}\u00A0}';
+    writeFileSync(TEST_CONFIG_PATH, configWithNbsp);
+    const loaded = loadConfig(TEST_CONFIG_PATH);
+    expect(loaded.identity.publicKey).toBe('302a300506032b657003210012345678');
+  });
+
+  it('should handle config with BOM', () => {
+    // Config with Byte Order Mark at the start
+    const configWithBom = '\uFEFF{"identity":{"publicKey":"302a300506032b657003210012345678","privateKey":"private123"}}';
+    writeFileSync(TEST_CONFIG_PATH, configWithBom);
+    const loaded = loadConfig(TEST_CONFIG_PATH);
+    expect(loaded.identity.publicKey).toBe('302a300506032b657003210012345678');
+  });
 });
 
 describe('Relay URL Resolution', () => {
