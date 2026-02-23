@@ -14,6 +14,7 @@
     "access": "public"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-string-width.js",
     "build": "tsc",
     "start": "node dist/cli.js",
     "test": "vitest run",
