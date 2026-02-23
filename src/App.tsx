@@ -6,7 +6,7 @@ import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
-import { resolveDisplayName, formatDisplayName } from './utils.js';
+import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
 import type { Message, ConnectionStatus } from './types.js';
 
@@ -22,10 +22,10 @@ interface AppProps {
 
 function extractTextFromPayload(payload: unknown): string {
   if (payload && typeof payload === 'object' && 'text' in payload && typeof (payload as { text: unknown }).text === 'string') {
-    return (payload as { text: string }).text;
+    return sanitizeText((payload as { text: string }).text);
   }
-  if (typeof payload === 'string') return payload;
-  return JSON.stringify(payload ?? '');
+  if (typeof payload === 'string') return sanitizeText(payload);
+  return sanitizeText(JSON.stringify(payload ?? ''));
 }
 
 export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath }: AppProps): JSX.Element {

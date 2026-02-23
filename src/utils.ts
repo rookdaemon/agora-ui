@@ -2,6 +2,16 @@ import { shortKey } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 
 /**
+ * Strip characters that crash Intl.Segmenter / string-width (used by Ink).
+ * Removes lone surrogates and non-printable control chars (except newline/tab).
+ */
+export function sanitizeText(text: string): string {
+  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, '')
+             .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '\uFFFD')
+             .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '\uFFFD');
+}
+
+/**
  * Resolves the display name for a peer in the UI.
  * Priority order:
  * 1. config.peers[publicKey].name (local config override)
@@ -28,7 +38,7 @@ export function resolveDisplayName(
   // Priority 2: peer.name (broadcast name from relay)
   // Only use if it's not a short ID (short IDs start with "...")
   if (peerName && !peerName.startsWith('...')) {
-    return peerName;
+    return sanitizeText(peerName);
   }
 
   // Priority 3: No name available
