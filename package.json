@@ -14,7 +14,6 @@
     "access": "public"
   },
   "scripts": {
-    "postinstall": "node scripts/patch-string-width.js",
     "build": "tsc",
     "start": "node dist/cli.js",
     "test": "vitest run",
@@ -40,6 +39,9 @@
     "ink-text-input": "^6.0.0",
     "react": "^18.2.0",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "string-width": "^8.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
