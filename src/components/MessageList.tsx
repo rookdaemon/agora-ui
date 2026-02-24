@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import type { Message } from '../types.js';
 
 interface MessageListProps {
@@ -9,6 +9,13 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, myPublicKey, myDisplayName }: MessageListProps): JSX.Element {
+  const { stdout } = useStdout();
+  // Reserve rows for header (~3), border (~2), input (~3), footer (~2)
+  const reservedRows = 10;
+  const terminalHeight = stdout?.rows ?? 24;
+  const maxVisible = Math.max(1, terminalHeight - reservedRows);
+  const visibleMessages = messages.slice(-maxVisible);
+
   const formatTime = (timestamp: number): string => {
     const date = new Date(timestamp);
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -26,10 +33,10 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1} minHeight={10}>
-      {messages.length === 0 ? (
+      {visibleMessages.length === 0 ? (
         <Text dimColor>No messages yet. Type a message and press Enter to send.</Text>
       ) : (
-        messages.map((msg, idx) => {
+        visibleMessages.map((msg, idx) => {
           // Check if message is from us by comparing display name or publicKey
           const isFromMe = msg.from === myDisplayName || msg.from === myPublicKey;
           return (
