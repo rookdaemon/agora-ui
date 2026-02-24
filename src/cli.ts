@@ -6,6 +6,7 @@ import { loadConfig, getRelayUrl } from './config.js';
 import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
+import { getSentPath } from './sent.js';
 
 function parseArgs(): { relay?: string; config?: string; name?: string; storageDir?: string } {
   const args = process.argv.slice(2);
@@ -57,6 +58,7 @@ function main() {
 
     // Resolve conversation file path from storage dir (CLI > .env > default agora config dir)
     const conversationPath = getConversationPath(storageDir);
+    const sentPath = getSentPath(storageDir);
 
     render(
       React.createElement(App, {
@@ -67,6 +69,7 @@ function main() {
         broadcastName,
         configPeers: config.peers,
         conversationPath,
+        sentPath,
       })
     );
   } catch (error) {

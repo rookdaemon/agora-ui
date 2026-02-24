@@ -8,6 +8,7 @@ import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
+import { appendToSent, loadSent } from './sent.js';
 import type { Message, ConnectionStatus } from './types.js';
 
 interface AppProps {
@@ -18,6 +19,7 @@ interface AppProps {
   broadcastName?: string;
   configPeers: Record<string, AgoraPeerConfig>;
   conversationPath?: string;
+  sentPath?: string;
 }
 
 function extractTextFromPayload(payload: unknown): string {
@@ -28,13 +30,14 @@ function extractTextFromPayload(payload: unknown): string {
   return sanitizeText(JSON.stringify(payload ?? ''));
 }
 
-export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath }: AppProps): JSX.Element {
+export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath, sentPath }: AppProps): JSX.Element {
   const { exit } = useApp();
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [systemMessages, setSystemMessages] = useState<Message[]>([]);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [peers, setPeers] = useState<Map<string, string>>(new Map());
+  const [sentHistory, setSentHistory] = useState<string[]>([]);
   const relayRef = useRef<RelayClient | null>(null);
 
   // All messages sorted by timestamp for display
@@ -47,6 +50,11 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   useEffect(() => {
     setChatMessages(loadConversation(conversationPath));
   }, [conversationPath]);
+
+  // Load sent history from SENT.md on mount
+  useEffect(() => {
+    setSentHistory(loadSent(sentPath));
+  }, [sentPath]);
 
   useEffect(() => {
     const client = new RelayClient({
@@ -189,6 +197,10 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       return;
     }
 
+    // Record every non-empty submitted line to sent history
+    try { appendToSent(value, sentPath); } catch {}
+    setSentHistory(prev => [...prev, value]);
+
     if (value.startsWith('/')) {
       handleCommand(value);
       setInputValue('');
@@ -266,6 +278,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         value={inputValue}
         onChange={setInputValue}
         onSubmit={handleSubmit}
+        sentHistory={sentHistory}
       />
       <Box marginTop={1}>
         <Text dimColor>Press Ctrl+C or type /quit to exit</Text>
