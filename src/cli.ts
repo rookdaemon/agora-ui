@@ -1,16 +1,14 @@
 #!/usr/bin/env node
-import React from 'react';
-import { render } from 'ink';
-import { App } from './App.js';
+import { startWebServer } from './server.js';
 import { loadConfig, getRelayUrl } from './config.js';
 import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
 import { getSentPath } from './sent.js';
 
-function parseArgs(): { relay?: string; config?: string; name?: string; storageDir?: string } {
+function parseArgs(): { relay?: string; config?: string; name?: string; storageDir?: string; port?: number } {
   const args = process.argv.slice(2);
-  const result: { relay?: string; config?: string; name?: string; storageDir?: string } = {};
+  const result: { relay?: string; config?: string; name?: string; storageDir?: string; port?: number } = {};
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--relay' && args[i + 1]) {
@@ -24,6 +22,14 @@ function parseArgs(): { relay?: string; config?: string; name?: string; storageD
       i++;
     } else if (args[i] === '--storage-dir' && args[i + 1]) {
       result.storageDir = args[i + 1];
+      i++;
+    } else if (args[i] === '--port' && args[i + 1]) {
+      const p = parseInt(args[i + 1], 10);
+      if (isNaN(p) || p < 1 || p > 65535) {
+        console.error('Invalid port: ' + args[i + 1] + ' (must be 1–65535)');
+        process.exit(1);
+      }
+      result.port = p;
       i++;
     }
   }
@@ -60,18 +66,17 @@ function main() {
     const conversationPath = getConversationPath(storageDir);
     const sentPath = getSentPath(storageDir);
 
-    render(
-      React.createElement(App, {
-        relayUrl,
-        publicKey: config.identity.publicKey,
-        privateKey: config.identity.privateKey,
-        username,
-        broadcastName,
-        configPeers: config.peers,
-        conversationPath,
-        sentPath,
-      })
-    );
+    startWebServer({
+      relayUrl,
+      publicKey: config.identity.publicKey,
+      privateKey: config.identity.privateKey,
+      username,
+      broadcastName,
+      configPeers: config.peers,
+      conversationPath,
+      sentPath,
+      port: cliArgs.port,
+    });
   } catch (error) {
     console.error('Error starting Agora UI:');
     if (error instanceof Error) {
