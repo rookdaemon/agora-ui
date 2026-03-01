@@ -75,6 +75,7 @@ const HTML = `<!DOCTYPE html>
     .msg-sender-other { color: #3fb950; }
     .msg-system .msg-time, .msg-system .msg-body { color: #6e7681; font-style: italic; }
     .dm-badge { color: #d29922; font-size: 0.78rem; margin-left: 4px; }
+    .all-badge { color: #58a6ff; font-size: 0.78rem; margin-left: 4px; }
     .input-row { display: flex; gap: 8px; }
     .input-row input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 12px; font-family: inherit; font-size: 0.88rem; outline: none; transition: border-color 0.15s; }
     .input-row input:focus { border-color: #58a6ff; }
@@ -131,7 +132,7 @@ function MessageItem({ msg, myDisplayName }) {
       <span className="msg-body">
         {!isSystem && <span className={'msg-sender ' + senderClass}>{senderLabel}: </span>}
         <span className="msg-text">{msg.text}</span>
-        {msg.isDM && <span className="dm-badge">(DM)</span>}
+        {!isSystem && (msg.isDM ? <span className="dm-badge">(DM)</span> : <span className="all-badge">(ALL)</span>)}
       </span>
     </div>
   );

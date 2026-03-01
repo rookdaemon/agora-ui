@@ -38,6 +38,7 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
       ) : (
         visibleMessages.map((msg, idx) => {
           // Check if message is from us by comparing display name or publicKey
+          const isSystem = msg.from === 'system';
           const isFromMe = msg.from === myDisplayName || msg.from === myPublicKey;
           return (
             <Box key={idx}>
@@ -46,7 +47,7 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
                 {formatSender(msg.from)}:
               </Text>
               <Text> {msg.text}</Text>
-              {msg.isDM && <Text dimColor> (DM)</Text>}
+              {!isSystem && (msg.isDM ? <Text dimColor> (DM)</Text> : <Text dimColor> (ALL)</Text>)}
             </Box>
           );
         })
