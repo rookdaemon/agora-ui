@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Box, Text, useApp } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
 import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
+import { Tabs } from './components/Tabs.js';
+import type { TabItem } from './components/Tabs.js';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
 import { appendToSent, loadSent } from './sent.js';
@@ -38,6 +40,9 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   const [inputValue, setInputValue] = useState('');
   const [peers, setPeers] = useState<Map<string, string>>(new Map());
   const [sentHistory, setSentHistory] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<string>('all');
+  // peerKey -> displayName for peers with DM history
+  const [dmPeers, setDmPeers] = useState<Map<string, string>>(new Map());
   const relayRef = useRef<RelayClient | null>(null);
 
   // All messages sorted by timestamp for display
@@ -46,9 +51,44 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     [systemMessages, chatMessages]
   );
 
+  // Available tabs: "All" + one per peer with DM history
+  const tabs = useMemo<TabItem[]>(() => {
+    const peerTabs = Array.from(dmPeers.entries()).map(([id, label]) => ({ id, label }));
+    return [{ id: 'all', label: 'All' }, ...peerTabs];
+  }, [dmPeers]);
+
+  // Messages visible in the current tab
+  const tabMessages = useMemo(() => {
+    if (activeTab === 'all') return messages;
+    // Per-peer DM tab: system messages + DMs with this specific peer
+    return messages.filter(msg => msg.from === 'system' || msg.peer === activeTab);
+  }, [messages, activeTab]);
+
+  // Switch tabs with the Tab key
+  useInput((_input, key) => {
+    if (key.tab && tabs.length > 1) {
+      const ids = tabs.map(t => t.id);
+      const next = (ids.indexOf(activeTab) + 1) % ids.length;
+      setActiveTab(ids[next]);
+    }
+  });
+
   // Load chat history from CONVERSATION.md on mount
   useEffect(() => {
-    setChatMessages(loadConversation(conversationPath));
+    const loaded = loadConversation(conversationPath);
+    setChatMessages(loaded);
+    // Restore DM peer tabs from history (only messages where peer is known)
+    const peersFromHistory = new Map<string, string>();
+    for (const msg of loaded) {
+      if (msg.isDM && msg.peer && !peersFromHistory.has(msg.peer)) {
+        // Use the last 8 hex chars of the key as a short display label until
+        // the relay resolves the real display name for this peer.
+        peersFromHistory.set(msg.peer, msg.peer.slice(-8));
+      }
+    }
+    if (peersFromHistory.size > 0) {
+      setDmPeers(peersFromHistory);
+    }
   }, [conversationPath]);
 
   // Load sent history from SENT.md on mount
@@ -93,12 +133,27 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       const resolvedName = resolveDisplayName(from, fromName, configPeers);
       const displayName = formatDisplayName(resolvedName, from);
       const text = extractTextFromPayload(envelope.payload);
+      // Detect DMs: sender included a `dm: true` marker in the payload
+      const isDM = !!(
+        envelope.payload &&
+        typeof envelope.payload === 'object' &&
+        (envelope.payload as Record<string, unknown>).dm === true
+      );
       const msg: Message = {
         from: displayName,
         text,
         timestamp: envelope.timestamp,
-        isDM: false,
+        isDM,
+        peer: isDM ? from : undefined,
       };
+      if (isDM) {
+        setDmPeers(prev => {
+          if (prev.has(from)) return prev;
+          const next = new Map(prev);
+          next.set(from, displayName);
+          return next;
+        });
+      }
       setChatMessages(prev => [...prev, msg].slice(-MAX_CONVERSATION_LINES));
       try { appendToConversation(msg, conversationPath); } catch {}
     });
@@ -173,6 +228,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       addSystemMessage('  /clear - Clear message history');
       addSystemMessage('  /help - Show this help');
       addSystemMessage('  /quit - Exit the chat');
+      addSystemMessage('  Tab - Switch between conversation tabs');
       return true;
     }
 
@@ -214,29 +270,65 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       return;
     }
 
+    // If we're in a peer's DM tab and the message has no explicit @peer prefix,
+    // automatically send it as a DM to that peer.
+    const autoTargetKey = activeTab !== 'all' ? activeTab : null;
+
     const dmMatch = value.match(/^@(\S+)\s+(.+)$/);
     if (dmMatch) {
-      const [, peerName, text] = dmMatch;
+      const [, matchedName, text] = dmMatch;
       const peerEntry = Array.from(peers.entries()).find(
-        ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
+        ([key, name]) => name.startsWith(matchedName) || key.startsWith(matchedName)
       );
-
-      if (peerEntry) {
-        const [peerKey] = peerEntry;
-        const envelope = createEnvelope('publish', publicKey, privateKey, { text });
-        relay.send(peerKey, envelope);
-        const ownDisplayName = formatDisplayName(broadcastName, publicKey);
-        const dmMsg: Message = {
-          from: ownDisplayName,
-          text: `@${peerName}: ${text}`,
-          timestamp: Date.now(),
-          isDM: true,
-        };
-        appendToConversation(dmMsg, conversationPath);
-        setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
-      } else {
-        addSystemMessage(`Peer '${peerName}' not found`);
+      if (!peerEntry) {
+        addSystemMessage(`Peer '${matchedName}' not found`);
+        setInputValue('');
+        return;
       }
+      const [peerKey] = peerEntry;
+      const envelope = createEnvelope('publish', publicKey, privateKey, { text, dm: true });
+      relay.send(peerKey, envelope);
+      const ownDisplayName = formatDisplayName(broadcastName, publicKey);
+      const dmMsg: Message = {
+        from: ownDisplayName,
+        text: `@${matchedName}: ${text}`,
+        timestamp: Date.now(),
+        isDM: true,
+        peer: peerKey,
+      };
+      setDmPeers(prev => {
+        if (prev.has(peerKey)) return prev;
+        const next = new Map(prev);
+        next.set(peerKey, peers.get(peerKey) ?? matchedName);
+        return next;
+      });
+      try { appendToConversation(dmMsg, conversationPath); } catch {}
+      setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
+      setInputValue('');
+      return;
+    }
+
+    if (autoTargetKey) {
+      // In a peer DM tab — send message directly to that peer without @mention
+      const peerKey = autoTargetKey;
+      const envelope = createEnvelope('publish', publicKey, privateKey, { text: value, dm: true });
+      relay.send(peerKey, envelope);
+      const ownDisplayName = formatDisplayName(broadcastName, publicKey);
+      const dmMsg: Message = {
+        from: ownDisplayName,
+        text: value,
+        timestamp: Date.now(),
+        isDM: true,
+        peer: peerKey,
+      };
+      setDmPeers(prev => {
+        if (prev.has(peerKey)) return prev;
+        const next = new Map(prev);
+        next.set(peerKey, peers.get(peerKey) ?? peerKey);
+        return next;
+      });
+      try { appendToConversation(dmMsg, conversationPath); } catch {}
+      setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
       setInputValue('');
       return;
     }
@@ -271,8 +363,9 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         publicKey={publicKey}
         onlinePeers={onlinePeerNames}
       />
+      <Tabs tabs={tabs} activeTab={activeTab} />
       <Box marginY={1}>
-        <MessageList messages={messages} myPublicKey={publicKey} myDisplayName={formatDisplayName(broadcastName, publicKey)} />
+        <MessageList messages={tabMessages} myPublicKey={publicKey} myDisplayName={formatDisplayName(broadcastName, publicKey)} />
       </Box>
       <Input
         value={inputValue}
