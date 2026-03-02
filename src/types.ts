@@ -16,6 +16,8 @@ export interface Message {
   text: string;
   timestamp: number;
   isDM?: boolean;
+  /** For DM messages: the other party's public key */
+  peer?: string;
 }
 
 export interface PeerInfo {

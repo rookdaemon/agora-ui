@@ -44,7 +44,7 @@ export function Input({ value, onChange, onSubmit, sentHistory = [] }: InputProp
   };
 
   return (
-    <Box borderStyle="single" borderColor="blue" paddingX={1}>
+    <Box borderStyle="single" borderColor="blue" paddingX={1} minHeight={4}>
       <Text color="blue">&gt; </Text>
       <TextInput
         value={value}

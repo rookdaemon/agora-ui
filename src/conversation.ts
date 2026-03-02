@@ -3,7 +3,7 @@ import { join, dirname } from 'path';
 import { getDefaultConfigPath } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
-export const MAX_CONVERSATION_LINES = 200;
+export const MAX_CONVERSATION_LINES = 2000;
 
 /**
  * Returns the path to the CONVERSATION.md file.
@@ -26,7 +26,10 @@ export function formatMessageLine(msg: Message): string {
   const ts = new Date(msg.timestamp).toISOString();
   // Replace newlines in text to ensure single-line format
   const safeText = msg.text.replace(/\r?\n/g, ' ');
-  const dmPrefix = msg.isDM ? '[DM] ' : '';
+  let dmPrefix = '';
+  if (msg.isDM) {
+    dmPrefix = msg.peer ? `[DM:${msg.peer}] ` : '[DM] ';
+  }
   return `[${ts}] [${msg.from}] ${dmPrefix}${safeText}`;
 }
 
@@ -40,9 +43,18 @@ export function parseMessageLine(line: string): Message | null {
   const [, ts, from, rest] = match;
   const timestamp = new Date(ts).getTime();
   if (isNaN(timestamp)) return null;
-  const isDM = rest.startsWith('[DM] ');
-  const text = isDM ? rest.slice(5) : rest;
-  return { from, text, timestamp, isDM };
+
+  // Check for [DM:peerKey] marker (new format with peer tracking)
+  const dmWithPeerMatch = rest.match(/^\[DM:([^\]]+)\] (.*)/s);
+  if (dmWithPeerMatch) {
+    const [, peer, text] = dmWithPeerMatch;
+    return { from, text, timestamp, isDM: true, peer };
+  }
+  // Check for legacy [DM] marker (no peer info)
+  if (rest.startsWith('[DM] ')) {
+    return { from, text: rest.slice(5), timestamp, isDM: true };
+  }
+  return { from, text: rest, timestamp, isDM: false };
 }
 
 /**

@@ -74,6 +74,16 @@ describe('parseMessageLine', () => {
     expect(msg).not.toBeNull();
     expect(msg!.isDM).toBe(true);
     expect(msg!.text).toBe('@Bob: hey');
+    expect(msg!.peer).toBeUndefined();
+  });
+
+  it('parses isDM and peer from [DM:peerKey] format', () => {
+    const line = '[2023-11-14T22:13:20.000Z] [Alice] [DM:abc123def456] @Bob: hey';
+    const msg = parseMessageLine(line);
+    expect(msg).not.toBeNull();
+    expect(msg!.isDM).toBe(true);
+    expect(msg!.peer).toBe('abc123def456');
+    expect(msg!.text).toBe('@Bob: hey');
   });
 
   it('parses isDM as false for non-DM messages', () => {
@@ -83,13 +93,25 @@ describe('parseMessageLine', () => {
     expect(msg!.isDM).toBe(false);
   });
 
-  it('roundtrips isDM=true through format and parse', () => {
+  it('roundtrips isDM=true (no peer) through format and parse', () => {
     const original: Message = { from: 'Alice', text: '@Bob: hello', timestamp: 1700000000000, isDM: true };
     const line = formatMessageLine(original);
     const parsed = parseMessageLine(line);
     expect(parsed).not.toBeNull();
     expect(parsed!.isDM).toBe(true);
+    expect(parsed!.peer).toBeUndefined();
     expect(parsed!.text).toBe('@Bob: hello');
+  });
+
+  it('roundtrips isDM=true with peer through format and parse', () => {
+    const original: Message = { from: 'Alice', text: 'hello', timestamp: 1700000000000, isDM: true, peer: 'abc123def456' };
+    const line = formatMessageLine(original);
+    expect(line).toContain('[DM:abc123def456]');
+    const parsed = parseMessageLine(line);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.isDM).toBe(true);
+    expect(parsed!.peer).toBe('abc123def456');
+    expect(parsed!.text).toBe('hello');
   });
 
   it('roundtrips through format and parse', () => {
