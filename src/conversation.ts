@@ -1,9 +1,9 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { getDefaultConfigPath } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
-export const MAX_CONVERSATION_BYTES = 2048;
+export const MAX_CONVERSATION_BYTES = 4096;
 
 /**
  * Returns the path to the CONVERSATION.md file.
@@ -75,7 +75,7 @@ export function trimToByteLimit(lines: string[], maxBytes: number): string[] {
 
 /**
  * Appends a message to the CONVERSATION.md file.
- * Enforces a maximum of MAX_CONVERSATION_BYTES bytes, trimming at even-message boundaries.
+ * Full history is retained on disk — no truncation.
  */
 export function appendToConversation(msg: Message, filePath?: string): void {
   const path = filePath ?? getConversationPath();
@@ -85,20 +85,16 @@ export function appendToConversation(msg: Message, filePath?: string): void {
     mkdirSync(dir, { recursive: true });
   }
 
-  let lines: string[] = [];
-  if (existsSync(path)) {
-    lines = readFileSync(path, 'utf-8').split('\n').filter(l => l.length > 0);
-  }
+  const line = formatMessageLine(msg);
 
-  lines.push(formatMessageLine(msg));
-  lines = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
-
-  writeFileSync(path, lines.join('\n') + '\n', 'utf-8');
+  // Append-only — no read/rewrite needed
+  appendFileSync(path, line + '\n', 'utf-8');
 }
 
 /**
- * Loads and parses all messages from CONVERSATION.md.
- * Returns an empty array if the file does not exist or cannot be parsed.
+ * Loads messages from CONVERSATION.md, returning only the most recent
+ * messages that fit within MAX_CONVERSATION_BYTES (trimmed at even-message
+ * boundaries). Full history is preserved on disk.
  */
 export function loadConversation(filePath?: string): Message[] {
   const path = filePath ?? getConversationPath();
@@ -107,6 +103,7 @@ export function loadConversation(filePath?: string): Message[] {
 
   const content = readFileSync(path, 'utf-8');
   const lines = content.split('\n').filter(l => l.length > 0);
+  const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
 
-  return lines.map(parseMessageLine).filter((m): m is Message => m !== null);
+  return trimmed.map(parseMessageLine).filter((m): m is Message => m !== null);
 }

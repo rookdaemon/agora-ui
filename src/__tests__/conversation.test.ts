@@ -172,33 +172,15 @@ describe('appendToConversation', () => {
     expect(existsSync(deepPath)).toBe(true);
   });
 
-  it('trims to at most MAX_CONVERSATION_BYTES', () => {
-    // Each message line is ~55 bytes; fill well past 2048
-    for (let i = 0; i < 80; i++) {
-      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
-    }
-    const content = readFileSync(TEST_FILE, 'utf-8');
-    expect(Buffer.byteLength(content, 'utf-8')).toBeLessThanOrEqual(MAX_CONVERSATION_BYTES);
-  });
-
-  it('trims at even message boundaries', () => {
+  it('retains full history on disk without truncation', () => {
     for (let i = 0; i < 80; i++) {
       appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
     }
     const content = readFileSync(TEST_FILE, 'utf-8');
     const lines = content.split('\n').filter(l => l.length > 0);
-    // Line count should be even (trimmed 2 at a time)
-    expect(lines.length % 2).toBe(0);
-  });
-
-  it('keeps the most recent messages when trimming', () => {
-    for (let i = 0; i < 80; i++) {
-      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
-    }
-    const content = readFileSync(TEST_FILE, 'utf-8');
-    // The newest messages should be present; oldest trimmed away
+    expect(lines.length).toBe(80);
+    expect(content).toContain('message 0');
     expect(content).toContain('message 79');
-    expect(content).not.toContain('message 0]');
   });
 });
 
@@ -243,5 +225,27 @@ describe('loadConversation', () => {
     expect(loaded[0].text).toBe('Hello');
     expect(loaded[1].from).toBe('Bob');
     expect(loaded[1].text).toBe('Hi there');
+  });
+
+  it('returns only the most recent messages within MAX_CONVERSATION_BYTES', () => {
+    for (let i = 0; i < 200; i++) {
+      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
+    }
+    const loaded = loadConversation(TEST_FILE);
+    // Full file should be much larger than 4KB, but loaded messages should fit
+    const serialized = loaded.map(m => formatMessageLine(m)).join('\n') + '\n';
+    expect(Buffer.byteLength(serialized, 'utf-8')).toBeLessThanOrEqual(MAX_CONVERSATION_BYTES);
+    // Should include the newest message
+    expect(loaded[loaded.length - 1].text).toBe('message 199');
+    // Should NOT include the oldest
+    expect(loaded.find(m => m.text === 'message 0')).toBeUndefined();
+  });
+
+  it('loads messages trimmed at even boundaries', () => {
+    for (let i = 0; i < 200; i++) {
+      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
+    }
+    const loaded = loadConversation(TEST_FILE);
+    expect(loaded.length % 2).toBe(0);
   });
 });
