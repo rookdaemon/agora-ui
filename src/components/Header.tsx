@@ -26,7 +26,12 @@ export function Header({ status, username, publicKey, onlinePeers }: HeaderProps
       <Box>
         <Text>Online: </Text>
         {onlinePeers.length > 0 ? (
-          <Text color="green">{onlinePeers.join(', ')}</Text>
+          onlinePeers.map((name, i) => (
+            <Text key={name}>
+              {i > 0 ? ', ' : ''}
+              <Text color="green">[{i + 1}] {name}</Text>
+            </Text>
+          ))
         ) : (
           <Text dimColor>No peers online</Text>
         )}

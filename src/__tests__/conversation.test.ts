@@ -6,7 +6,8 @@ import {
   parseMessageLine,
   appendToConversation,
   loadConversation,
-  MAX_CONVERSATION_LINES,
+  trimToByteLimit,
+  MAX_CONVERSATION_BYTES,
 } from '../conversation.js';
 import type { Message } from '../types.js';
 
@@ -171,25 +172,33 @@ describe('appendToConversation', () => {
     expect(existsSync(deepPath)).toBe(true);
   });
 
-  it(`trims to at most ${MAX_CONVERSATION_LINES} lines`, () => {
-    const count = MAX_CONVERSATION_LINES + 10;
-    for (let i = 0; i < count; i++) {
+  it('trims to at most MAX_CONVERSATION_BYTES', () => {
+    // Each message line is ~55 bytes; fill well past 2048
+    for (let i = 0; i < 80; i++) {
+      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
+    }
+    const content = readFileSync(TEST_FILE, 'utf-8');
+    expect(Buffer.byteLength(content, 'utf-8')).toBeLessThanOrEqual(MAX_CONVERSATION_BYTES);
+  });
+
+  it('trims at even message boundaries', () => {
+    for (let i = 0; i < 80; i++) {
       appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
     }
     const content = readFileSync(TEST_FILE, 'utf-8');
     const lines = content.split('\n').filter(l => l.length > 0);
-    expect(lines.length).toBe(MAX_CONVERSATION_LINES);
+    // Line count should be even (trimmed 2 at a time)
+    expect(lines.length % 2).toBe(0);
   });
 
   it('keeps the most recent messages when trimming', () => {
-    const count = MAX_CONVERSATION_LINES + 5;
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < 80; i++) {
       appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
     }
     const content = readFileSync(TEST_FILE, 'utf-8');
-    // The oldest messages (0–4) should be gone; the newest should be present
+    // The newest messages should be present; oldest trimmed away
+    expect(content).toContain('message 79');
     expect(content).not.toContain('message 0]');
-    expect(content).toContain(`message ${count - 1}`);
   });
 });
 

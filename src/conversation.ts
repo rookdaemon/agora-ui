@@ -3,7 +3,7 @@ import { join, dirname } from 'path';
 import { getDefaultConfigPath } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
-export const MAX_CONVERSATION_LINES = 2000;
+export const MAX_CONVERSATION_BYTES = 2048;
 
 /**
  * Returns the path to the CONVERSATION.md file.
@@ -58,8 +58,24 @@ export function parseMessageLine(line: string): Message | null {
 }
 
 /**
+ * Trims lines from the front, removing 2 at a time (even-message boundary),
+ * until the total byte size of the joined content fits within maxBytes.
+ */
+export function trimToByteLimit(lines: string[], maxBytes: number): string[] {
+  let result = [...lines];
+  while (result.length > 0) {
+    const size = Buffer.byteLength(result.join('\n') + '\n', 'utf-8');
+    if (size <= maxBytes) break;
+    // Remove 2 lines at a time (even-message cut)
+    const removeCount = Math.min(2, result.length);
+    result = result.slice(removeCount);
+  }
+  return result;
+}
+
+/**
  * Appends a message to the CONVERSATION.md file.
- * Enforces a maximum of MAX_CONVERSATION_LINES lines.
+ * Enforces a maximum of MAX_CONVERSATION_BYTES bytes, trimming at even-message boundaries.
  */
 export function appendToConversation(msg: Message, filePath?: string): void {
   const path = filePath ?? getConversationPath();
@@ -75,10 +91,7 @@ export function appendToConversation(msg: Message, filePath?: string): void {
   }
 
   lines.push(formatMessageLine(msg));
-
-  if (lines.length > MAX_CONVERSATION_LINES) {
-    lines = lines.slice(lines.length - MAX_CONVERSATION_LINES);
-  }
+  lines = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
 
   writeFileSync(path, lines.join('\n') + '\n', 'utf-8');
 }

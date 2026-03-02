@@ -5,7 +5,7 @@ import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
-import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
+import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 
@@ -64,7 +64,13 @@ const HTML = `<!DOCTYPE html>
     .header-peers { font-size: 0.84rem; }
     .peers-label { color: #8b949e; }
     .peers-list { color: #3fb950; }
+    .peer-link { color: #3fb950; cursor: pointer; text-decoration: none; }
+    .peer-link:hover { text-decoration: underline; color: #58a6ff; }
     .peers-empty { color: #484f58; }
+    .tabs { display: flex; gap: 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; }
+    .tab { padding: 6px 14px; font-size: 0.82rem; cursor: pointer; border: none; background: transparent; color: #8b949e; font-family: inherit; transition: background 0.15s, color 0.15s; }
+    .tab:hover { background: #21262d; color: #c9d1d9; }
+    .tab-active { background: #21262d; color: #58a6ff; font-weight: 600; }
     .messages { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
     .messages-empty { color: #484f58; font-style: italic; font-size: 0.88rem; margin: auto; }
     .msg { font-size: 0.88rem; line-height: 1.5; padding: 1px 0; display: flex; gap: 8px; }
@@ -77,10 +83,10 @@ const HTML = `<!DOCTYPE html>
     .dm-badge { color: #d29922; font-size: 0.78rem; margin-left: 4px; }
     .all-badge { color: #58a6ff; font-size: 0.78rem; margin-left: 4px; }
     .input-row { display: flex; gap: 8px; }
-    .input-row input { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 12px; font-family: inherit; font-size: 0.88rem; outline: none; transition: border-color 0.15s; }
-    .input-row input:focus { border-color: #58a6ff; }
-    .input-row input::placeholder { color: #484f58; }
-    .input-row button { background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 18px; cursor: pointer; font-family: inherit; font-size: 0.88rem; transition: background 0.15s, border-color 0.15s; white-space: nowrap; }
+    .input-row textarea { flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 12px; font-family: inherit; font-size: 0.88rem; outline: none; transition: border-color 0.15s; resize: none; }
+    .input-row textarea:focus { border-color: #58a6ff; }
+    .input-row textarea::placeholder { color: #484f58; }
+    .input-row button { background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; padding: 8px 18px; cursor: pointer; font-family: inherit; font-size: 0.88rem; transition: background 0.15s, border-color 0.15s; white-space: nowrap; align-self: flex-end; }
     .input-row button:hover { background: #30363d; border-color: #58a6ff; color: #58a6ff; }
     .footer { text-align: center; color: #484f58; font-size: 0.76rem; padding: 2px 0; }
     .footer a { color: #484f58; text-decoration: none; }
@@ -99,7 +105,7 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function Header({ status, username, onlinePeers }) {
+function Header({ status, username, onlinePeers, onPeerClick }) {
   const statusClass = status === 'connected' ? 'status-connected'
     : status === 'connecting' ? 'status-connecting' : 'status-disconnected';
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
@@ -113,7 +119,12 @@ function Header({ status, username, onlinePeers }) {
       <div className="header-peers">
         <span className="peers-label">Online: </span>
         {onlinePeers.length > 0
-          ? <span className="peers-list">{onlinePeers.join(', ')}</span>
+          ? onlinePeers.map((p, i) => (
+              <span key={p.key}>
+                {i > 0 && ', '}
+                <a className="peer-link" onClick={() => onPeerClick(p)}>{p.name}</a>
+              </span>
+            ))
           : <span className="peers-empty">No peers online</span>
         }
       </div>
@@ -146,6 +157,8 @@ function App() {
   const [input, setInput] = useState('');
   const [sentHistory, setSentHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const [activeTab, setActiveTab] = useState('all');
+  const [dmPeers, setDmPeers] = useState([]);
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
@@ -160,10 +173,17 @@ function App() {
         setStatus(data.value);
       } else if (data.type === 'message') {
         setMessages(prev => [...prev, data]);
+        if (data.isDM && data.peer) {
+          setDmPeers(prev => prev.some(p => p.key === data.peer) ? prev : [...prev, { key: data.peer, name: data.peer.slice(-8) }]);
+        }
       } else if (data.type === 'system') {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
       } else if (data.type === 'peers') {
         setPeers(data.peers);
+        setDmPeers(prev => prev.map(dp => {
+          const match = data.peers.find(p => p.key === dp.key);
+          return match ? { ...dp, name: match.name } : dp;
+        }));
       } else if (data.type === 'info') {
         setUsername(data.username);
       } else if (data.type === 'clear') {
@@ -178,7 +198,18 @@ function App() {
 
   useEffect(() => {
     bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, activeTab]);
+
+  const tabs = [{ id: 'all', label: 'All' }, ...dmPeers.map(p => ({ id: p.key, label: p.name }))];
+
+  const visibleMessages = activeTab === 'all'
+    ? messages
+    : messages.filter(m => m.from === 'system' || m.peer === activeTab);
+
+  const openPeerTab = (peer) => {
+    setDmPeers(prev => prev.some(p => p.key === peer.key) ? prev : [...prev, peer]);
+    setActiveTab(peer.key);
+  };
 
   const sendMessage = () => {
     const text = input.trim();
@@ -188,12 +219,19 @@ function App() {
     setSentHistory(prev => [...prev, text]);
     setHistoryIndex(-1);
     draftRef.current = '';
-    ws.send(JSON.stringify(text.startsWith('/') ? { type: 'command', text } : { type: 'send', text }));
+    if (text.startsWith('/')) {
+      ws.send(JSON.stringify({ type: 'command', text }));
+    } else if (activeTab !== 'all' && !text.startsWith('@')) {
+      ws.send(JSON.stringify({ type: 'dm_send', text, peerKey: activeTab }));
+    } else {
+      ws.send(JSON.stringify({ type: 'send', text }));
+    }
     setInput('');
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       sendMessage();
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -216,23 +254,36 @@ function App() {
     }
   };
 
+  const tabPlaceholder = activeTab === 'all'
+    ? 'Type message (@peer for DM, /help for commands)'
+    : 'Type message to ' + (dmPeers.find(p => p.key === activeTab)?.name || '…');
+
   return (
     <div className="app">
-      <Header status={status} username={username} onlinePeers={peers} />
+      <Header status={status} username={username} onlinePeers={peers} onPeerClick={openPeerTab} />
+      {tabs.length > 1 && (
+        <div className="tabs">
+          {tabs.map(tab => (
+            <button key={tab.id} className={'tab' + (tab.id === activeTab ? ' tab-active' : '')} onClick={() => setActiveTab(tab.id)}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="messages">
-        {messages.length === 0
+        {visibleMessages.length === 0
           ? <div className="messages-empty">No messages yet. Type a message and press Enter to send.</div>
-          : messages.map((msg, i) => <MessageItem key={i} msg={msg} myDisplayName={username} />)
+          : visibleMessages.map((msg, i) => <MessageItem key={i} msg={msg} myDisplayName={username} />)
         }
         <div ref={bottomRef} />
       </div>
       <div className="input-row">
-        <input
-          type="text"
+        <textarea
+          rows={4}
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type message (@peer for DM, /help for commands)"
+          placeholder={tabPlaceholder}
           autoFocus
         />
         <button onClick={sendMessage}>Send</button>
@@ -287,7 +338,7 @@ export function startWebServer(options: WebServerOptions): void {
       const displayName = formatDisplayName(resolveDisplayName(p.publicKey, p.name, configPeers), p.publicKey);
       peers.set(p.publicKey, displayName);
     }
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.values()) });
+    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     if (online.length > 0) {
       broadcastToClients({ type: 'system', text: online.length + ' peer(s) online', timestamp: Date.now() });
     }
@@ -302,10 +353,17 @@ export function startWebServer(options: WebServerOptions): void {
   relay.on('message', (envelope: Envelope, from: string, fromName?: string) => {
     const displayName = formatDisplayName(resolveDisplayName(from, fromName, configPeers), from);
     const text = extractTextFromPayload(envelope.payload);
-    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, isDM: false };
+    const isDM = !!(
+      envelope.payload &&
+      typeof envelope.payload === 'object' &&
+      (envelope.payload as Record<string, unknown>).dm === true
+    );
+    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, isDM, peer: isDM ? from : undefined };
     messages.push(msg);
-    if (messages.length > MAX_CONVERSATION_LINES) {
-      messages.splice(0, messages.length - MAX_CONVERSATION_LINES);
+    {
+      const lines = messages.map(formatMessageLine);
+      const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
+      if (trimmed.length < messages.length) messages.splice(0, messages.length - trimmed.length);
     }
     try { appendToConversation(msg, conversationPath); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...msg });
@@ -314,14 +372,14 @@ export function startWebServer(options: WebServerOptions): void {
   relay.on('peer_online', (peer: RelayPeer) => {
     const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
     peers.set(peer.publicKey, displayName);
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.values()) });
+    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     broadcastToClients({ type: 'system', text: displayName + ' came online', timestamp: Date.now() });
   });
 
   relay.on('peer_offline', (peer: RelayPeer) => {
     const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
     peers.delete(peer.publicKey);
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.values()) });
+    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     broadcastToClients({ type: 'system', text: displayName + ' went offline', timestamp: Date.now() });
   });
 
@@ -332,20 +390,22 @@ export function startWebServer(options: WebServerOptions): void {
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
-    ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.values()) }));
+    ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
     }
 
     ws.on('message', (raw) => {
-      let parsed: { type?: string; text?: string };
+      let parsed: { type?: string; text?: string; peerKey?: string };
       try {
-        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string };
+        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string; peerKey?: string };
       } catch {
         return;
       }
       if (parsed.type === 'send' && parsed.text) {
         handleSend(parsed.text);
+      } else if (parsed.type === 'dm_send' && parsed.text && parsed.peerKey) {
+        handleDmSend(parsed.text, parsed.peerKey);
       } else if (parsed.type === 'command' && parsed.text) {
         handleCommand(parsed.text, ws);
       }
@@ -368,9 +428,9 @@ export function startWebServer(options: WebServerOptions): void {
       );
       if (peerEntry) {
         const [peerKey] = peerEntry;
-        const envelope = createEnvelope('publish', publicKey, privateKey, { text: dmText });
+        const envelope = createEnvelope('publish', publicKey, privateKey, { text: dmText, dm: true });
         relay.send(peerKey, envelope);
-        const dmMsg: Message = { from: ownDisplayName, text: '@' + peerName + ': ' + dmText, timestamp: Date.now(), isDM: true };
+        const dmMsg: Message = { from: ownDisplayName, text: '@' + peerName + ': ' + dmText, timestamp: Date.now(), isDM: true, peer: peerKey };
         messages.push(dmMsg);
         try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
@@ -389,11 +449,29 @@ export function startWebServer(options: WebServerOptions): void {
     relay.broadcast(envelope);
     const outMsg: Message = { from: ownDisplayName, text, timestamp: Date.now(), isDM: false };
     messages.push(outMsg);
-    if (messages.length > MAX_CONVERSATION_LINES) {
-      messages.splice(0, messages.length - MAX_CONVERSATION_LINES);
+    {
+      const lines = messages.map(formatMessageLine);
+      const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
+      if (trimmed.length < messages.length) messages.splice(0, messages.length - trimmed.length);
     }
     try { appendToConversation(outMsg, conversationPath); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...outMsg });
+  };
+
+  const handleDmSend = (text: string, peerKey: string): void => {
+    try { appendToSent(text, sentPath); } catch { /* ignore */ }
+
+    if (!relay.connected()) {
+      broadcastToClients({ type: 'system', text: 'Not connected to relay', timestamp: Date.now() });
+      return;
+    }
+
+    const envelope = createEnvelope('publish', publicKey, privateKey, { text, dm: true });
+    relay.send(peerKey, envelope);
+    const dmMsg: Message = { from: ownDisplayName, text, timestamp: Date.now(), isDM: true, peer: peerKey };
+    messages.push(dmMsg);
+    try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
+    broadcastToClients({ type: 'message', ...dmMsg });
   };
 
   const handleCommand = (cmd: string, ws: WebSocket): void => {

@@ -9,7 +9,7 @@ import { Input } from './components/Input.js';
 import { Tabs } from './components/Tabs.js';
 import type { TabItem } from './components/Tabs.js';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
-import { appendToConversation, loadConversation, MAX_CONVERSATION_LINES } from './conversation.js';
+import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
 import { appendToSent, loadSent } from './sent.js';
 import type { Message, ConnectionStatus } from './types.js';
 
@@ -30,6 +30,14 @@ function extractTextFromPayload(payload: unknown): string {
   }
   if (typeof payload === 'string') return sanitizeText(payload);
   return sanitizeText(JSON.stringify(payload ?? ''));
+}
+
+/** Trim messages array so their serialised form fits within MAX_CONVERSATION_BYTES. */
+function trimMessages(msgs: Message[]): Message[] {
+  const lines = msgs.map(formatMessageLine);
+  const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
+  // trimToByteLimit removes from the front; return the corresponding tail of msgs
+  return msgs.slice(msgs.length - trimmed.length);
 }
 
 export function App({ relayUrl, publicKey, privateKey, username, broadcastName, configPeers, conversationPath, sentPath }: AppProps): JSX.Element {
@@ -64,12 +72,27 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     return messages.filter(msg => msg.from === 'system' || msg.peer === activeTab);
   }, [messages, activeTab]);
 
-  // Switch tabs with the Tab key
-  useInput((_input, key) => {
+  // Switch tabs with the Tab key; open DM tabs with number keys (1-9)
+  useInput((input, key) => {
     if (key.tab && tabs.length > 1) {
       const ids = tabs.map(t => t.id);
       const next = (ids.indexOf(activeTab) + 1) % ids.length;
       setActiveTab(ids[next]);
+    }
+    // Number keys 1-9: open/switch to DM tab for the Nth online peer
+    const num = parseInt(input, 10);
+    if (num >= 1 && num <= 9) {
+      const peerEntries = Array.from(peers.entries());
+      if (num <= peerEntries.length) {
+        const [peerKey, displayName] = peerEntries[num - 1];
+        setDmPeers(prev => {
+          if (prev.has(peerKey)) return prev;
+          const next = new Map(prev);
+          next.set(peerKey, displayName);
+          return next;
+        });
+        setActiveTab(peerKey);
+      }
     }
   });
 
@@ -154,7 +177,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
           return next;
         });
       }
-      setChatMessages(prev => [...prev, msg].slice(-MAX_CONVERSATION_LINES));
+      setChatMessages(prev => trimMessages([...prev, msg]));
       try { appendToConversation(msg, conversationPath); } catch {}
     });
 
@@ -223,6 +246,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
 
     if (cmd === '/help') {
       addSystemMessage('Commands:');
+      addSystemMessage('  1-9 - Open DM tab for numbered peer');
       addSystemMessage('  @peer message - Send DM to specific peer');
       addSystemMessage('  /peers - List online peers with full pubkeys');
       addSystemMessage('  /clear - Clear message history');
@@ -303,7 +327,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         return next;
       });
       try { appendToConversation(dmMsg, conversationPath); } catch {}
-      setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
+      setChatMessages(prev => trimMessages([...prev, dmMsg]));
       setInputValue('');
       return;
     }
@@ -328,7 +352,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         return next;
       });
       try { appendToConversation(dmMsg, conversationPath); } catch {}
-      setChatMessages(prev => [...prev, dmMsg].slice(-MAX_CONVERSATION_LINES));
+      setChatMessages(prev => trimMessages([...prev, dmMsg]));
       setInputValue('');
       return;
     }
@@ -347,7 +371,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         isDM: false,
       };
       appendToConversation(outMsg, conversationPath);
-      setChatMessages(prev => [...prev, outMsg].slice(-MAX_CONVERSATION_LINES));
+      setChatMessages(prev => trimMessages([...prev, outMsg]));
     }
 
     setInputValue('');
