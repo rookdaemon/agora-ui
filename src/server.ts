@@ -67,9 +67,18 @@ const HTML = `<!DOCTYPE html>
     .header-peers { font-size: 0.84rem; }
     .peers-label { color: #8b949e; }
     .peers-list { color: #3fb950; }
+    .peer-item { display: inline-flex; align-items: center; gap: 6px; }
     .peer-link { color: #3fb950; cursor: pointer; text-decoration: none; }
     .peer-link:hover { text-decoration: underline; color: #58a6ff; }
+    .peer-toggle { background: #21262d; border: 1px solid #30363d; color: #8b949e; border-radius: 999px; padding: 1px 8px; font-size: 0.72rem; cursor: pointer; font-family: inherit; }
+    .peer-toggle:hover { border-color: #58a6ff; color: #58a6ff; }
+    .peer-toggle-active { border-color: #f85149; color: #f85149; }
     .peers-empty { color: #484f58; }
+    .ignored-section { font-size: 0.82rem; color: #8b949e; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ignored-list { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+    .ignored-item { display: inline-flex; align-items: center; gap: 6px; padding: 1px 6px; border: 1px solid #30363d; border-radius: 999px; }
+    .ignored-name { color: #f85149; }
+    .ignored-key { color: #6e7681; font-size: 0.74rem; }
     .tabs { display: flex; gap: 0; background: #161b22; border: 1px solid #30363d; border-radius: 6px; overflow: hidden; }
     .tab { padding: 6px 14px; font-size: 0.82rem; cursor: pointer; border: none; background: transparent; color: #8b949e; font-family: inherit; transition: background 0.15s, color 0.15s; }
     .tab:hover { background: #21262d; color: #c9d1d9; }
@@ -108,7 +117,7 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function Header({ status, username, onlinePeers, onPeerClick }) {
+function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick, onToggleIgnore }) {
   const statusClass = status === 'connected' ? 'status-connected'
     : status === 'connecting' ? 'status-connecting' : 'status-disconnected';
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
@@ -123,12 +132,39 @@ function Header({ status, username, onlinePeers, onPeerClick }) {
         <span className="peers-label">Online: </span>
         {onlinePeers.length > 0
           ? onlinePeers.map((p, i) => (
-              <span key={p.key}>
+              <span key={p.key} className="peer-item">
                 {i > 0 && ', '}
                 <a className="peer-link" onClick={() => onPeerClick(p)}>{p.name}</a>
+                <button
+                  className={'peer-toggle' + (ignoredPeers.includes(p.key) ? ' peer-toggle-active' : '')}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleIgnore(p.key); }}
+                >
+                  {ignoredPeers.includes(p.key) ? 'Unignore' : 'Ignore'}
+                </button>
               </span>
             ))
           : <span className="peers-empty">No peers online</span>
+        }
+      </div>
+      <div className="ignored-section">
+        <span>Ignored:</span>
+        {ignoredPeers.length === 0
+          ? <span className="peers-empty">None</span>
+          : (
+            <span className="ignored-list">
+              {ignoredPeers.map((key) => {
+                const match = onlinePeers.find((peer) => peer.key === key);
+                const label = match?.name || ('...' + key.slice(-8));
+                return (
+                  <span key={key} className="ignored-item">
+                    <span className="ignored-name">{label}</span>
+                    <span className="ignored-key">({key.slice(0, 10)}…)</span>
+                    <button className="peer-toggle peer-toggle-active" onClick={() => onToggleIgnore(key)}>Unignore</button>
+                  </span>
+                );
+              })}
+            </span>
+          )
         }
       </div>
     </div>
@@ -162,6 +198,7 @@ function App() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [activeTab, setActiveTab] = useState('all');
   const [dmPeers, setDmPeers] = useState([]);
+  const [ignoredPeers, setIgnoredPeers] = useState([]);
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
@@ -189,6 +226,8 @@ function App() {
         }));
       } else if (data.type === 'info') {
         setUsername(data.username);
+      } else if (data.type === 'ignored_peers') {
+        setIgnoredPeers(data.peers || []);
       } else if (data.type === 'clear') {
         setMessages([]);
       }
@@ -212,6 +251,16 @@ function App() {
   const openPeerTab = (peer) => {
     setDmPeers(prev => prev.some(p => p.key === peer.key) ? prev : [...prev, peer]);
     setActiveTab(peer.key);
+  };
+
+  const toggleIgnorePeer = (peerKey) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    if (ignoredPeers.includes(peerKey)) {
+      ws.send(JSON.stringify({ type: 'unignore_peer', peerKey }));
+    } else {
+      ws.send(JSON.stringify({ type: 'ignore_peer', peerKey }));
+    }
   };
 
   const sendMessage = () => {
@@ -263,7 +312,7 @@ function App() {
 
   return (
     <div className="app">
-      <Header status={status} username={username} onlinePeers={peers} onPeerClick={openPeerTab} />
+      <Header status={status} username={username} onlinePeers={peers} ignoredPeers={ignoredPeers} onPeerClick={openPeerTab} onToggleIgnore={toggleIgnorePeer} />
       {tabs.length > 1 && (
         <div className="tabs">
           {tabs.map(tab => (
@@ -333,6 +382,10 @@ export function startWebServer(options: WebServerOptions): void {
   };
 
   const relay = new RelayClient({ relayUrl, publicKey, privateKey, name: broadcastName });
+
+  const broadcastIgnoredPeers = (): void => {
+    broadcastToClients({ type: 'ignored_peers', peers: guard.listIgnoredPeers() });
+  };
 
   relay.on('connected', () => {
     relayStatus = 'connected';
@@ -405,6 +458,7 @@ export function startWebServer(options: WebServerOptions): void {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
     ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
+    ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
     }
@@ -422,6 +476,22 @@ export function startWebServer(options: WebServerOptions): void {
         handleDmSend(parsed.text, parsed.peerKey);
       } else if (parsed.type === 'command' && parsed.text) {
         handleCommand(parsed.text, ws);
+      } else if (parsed.type === 'ignore_peer' && parsed.peerKey) {
+        const added = guard.ignorePeer(parsed.peerKey);
+        ws.send(JSON.stringify({
+          type: 'system',
+          text: added ? ('Ignoring peer ' + parsed.peerKey) : ('Peer already ignored: ' + parsed.peerKey),
+          timestamp: Date.now(),
+        }));
+        broadcastIgnoredPeers();
+      } else if (parsed.type === 'unignore_peer' && parsed.peerKey) {
+        const removed = guard.unignorePeer(parsed.peerKey);
+        ws.send(JSON.stringify({
+          type: 'system',
+          text: removed ? ('Removed ignored peer ' + parsed.peerKey) : ('Peer was not ignored: ' + parsed.peerKey),
+          timestamp: Date.now(),
+        }));
+        broadcastIgnoredPeers();
       }
     });
   });
@@ -528,6 +598,7 @@ export function startWebServer(options: WebServerOptions): void {
       }
       const added = guard.ignorePeer(key);
       reply(added ? ('Ignoring peer ' + key) : ('Peer already ignored: ' + key));
+      broadcastIgnoredPeers();
       return;
     }
 
@@ -540,6 +611,7 @@ export function startWebServer(options: WebServerOptions): void {
       }
       const removed = guard.unignorePeer(key);
       reply(removed ? ('Removed ignored peer ' + key) : ('Peer was not ignored: ' + key));
+      broadcastIgnoredPeers();
       return;
     }
 
