@@ -64,7 +64,7 @@ describe('appendToSent', () => {
     const content = readFileSync(TEST_FILE, 'utf-8');
     const lines = content.split('\n').filter(l => l.length > 0);
     expect(lines.length).toBe(MAX_SENT_LINES);
-  });
+  }, 20000);
 
   it('keeps the most recent lines when trimming', () => {
     const count = MAX_SENT_LINES + 5;

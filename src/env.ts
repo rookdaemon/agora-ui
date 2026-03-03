@@ -11,6 +11,29 @@ export interface AgoraUiEnv {
   configPath?: string;
   /** Display name broadcast to peers */
   name?: string;
+  rateLimitEnabled?: boolean;
+  rateLimitMaxMessages?: number;
+  rateLimitWindowMs?: number;
+  envelopeDedupEnabled?: boolean;
+  envelopeDedupMaxIds?: number;
+  contentDedupEnabled?: boolean;
+  contentDedupWindowMs?: number;
+  ignoredPeers?: string[];
+}
+
+function parseBoolean(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
 }
 
 /**
@@ -74,6 +97,34 @@ export function loadEnv(envFilePath?: string): AgoraUiEnv {
   }
   if (raw['AGORA_UI_NAME']) {
     env.name = raw['AGORA_UI_NAME'];
+  }
+
+  const rlEnabled = parseBoolean(raw['AGORA_UI_RATE_LIMIT_ENABLED']);
+  if (rlEnabled !== undefined) env.rateLimitEnabled = rlEnabled;
+
+  const rlMax = parsePositiveInt(raw['AGORA_UI_RATE_LIMIT_MAX_MESSAGES']);
+  if (rlMax !== undefined) env.rateLimitMaxMessages = rlMax;
+
+  const rlWindow = parsePositiveInt(raw['AGORA_UI_RATE_LIMIT_WINDOW_MS']);
+  if (rlWindow !== undefined) env.rateLimitWindowMs = rlWindow;
+
+  const dedupEnabled = parseBoolean(raw['AGORA_UI_DEDUP_ENABLED']);
+  if (dedupEnabled !== undefined) env.envelopeDedupEnabled = dedupEnabled;
+
+  const dedupMax = parsePositiveInt(raw['AGORA_UI_DEDUP_MAX_IDS']);
+  if (dedupMax !== undefined) env.envelopeDedupMaxIds = dedupMax;
+
+  const contentEnabled = parseBoolean(raw['AGORA_UI_CONTENT_DEDUP_ENABLED']);
+  if (contentEnabled !== undefined) env.contentDedupEnabled = contentEnabled;
+
+  const contentWindow = parsePositiveInt(raw['AGORA_UI_CONTENT_DEDUP_WINDOW_MS']);
+  if (contentWindow !== undefined) env.contentDedupWindowMs = contentWindow;
+
+  if (raw['AGORA_UI_IGNORED_PEERS']) {
+    env.ignoredPeers = raw['AGORA_UI_IGNORED_PEERS']
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
   }
 
   return env;

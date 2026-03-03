@@ -8,6 +8,8 @@ import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js'
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
+import type { SecurityOptions } from './types.js';
+import { InboundMessageGuard } from './security.js';
 
 export interface WebServerOptions {
   relayUrl: string;
@@ -19,6 +21,7 @@ export interface WebServerOptions {
   conversationPath?: string;
   sentPath?: string;
   port?: number;
+  security?: SecurityOptions;
 }
 
 function extractTextFromPayload(payload: unknown): string {
@@ -304,10 +307,12 @@ export function startWebServer(options: WebServerOptions): void {
   const {
     relayUrl, publicKey, privateKey, username, broadcastName,
     configPeers, conversationPath, sentPath, port = 3000,
+    security,
   } = options;
 
   const messages: Message[] = loadConversation(conversationPath);
   const peers = new Map<string, string>();
+  const guard = new InboundMessageGuard(security);
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const ownDisplayName = formatDisplayName(broadcastName, publicKey);
 
@@ -351,6 +356,15 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('message', (envelope: Envelope, from: string, fromName?: string) => {
+    const guardResult = guard.shouldDrop(envelope, from);
+    if (guardResult.drop) {
+      if (guardResult.reason === 'ignored_peer') {
+        return;
+      }
+      broadcastToClients({ type: 'system', text: 'Dropped inbound message (' + guardResult.reason + ')', timestamp: Date.now() });
+      return;
+    }
+
     const displayName = formatDisplayName(resolveDisplayName(from, fromName, configPeers), from);
     const text = extractTextFromPayload(envelope.payload);
     const isDM = !!(
@@ -496,11 +510,50 @@ export function startWebServer(options: WebServerOptions): void {
         'Commands:',
         '  @peer message — Send DM to specific peer',
         '  /peers — List online peers with public keys',
+        '  /ignore <pubkey> — Ignore inbound messages from a peer',
+        '  /unignore <pubkey> — Remove a peer from ignore list',
+        '  /ignored — List ignored peers',
         '  /clear — Clear message history',
         '  /help — Show this help',
       ].forEach(text => reply(text));
       return;
     }
+
+    const ignoreMatch = cmd.match(/^\/ignore\s+(.+)$/i);
+    if (ignoreMatch) {
+      const key = ignoreMatch[1].trim();
+      if (!key) {
+        reply('Usage: /ignore <publicKey>');
+        return;
+      }
+      const added = guard.ignorePeer(key);
+      reply(added ? ('Ignoring peer ' + key) : ('Peer already ignored: ' + key));
+      return;
+    }
+
+    const unignoreMatch = cmd.match(/^\/unignore\s+(.+)$/i);
+    if (unignoreMatch) {
+      const key = unignoreMatch[1].trim();
+      if (!key) {
+        reply('Usage: /unignore <publicKey>');
+        return;
+      }
+      const removed = guard.unignorePeer(key);
+      reply(removed ? ('Removed ignored peer ' + key) : ('Peer was not ignored: ' + key));
+      return;
+    }
+
+    if (lower === '/ignored') {
+      const ignored = guard.listIgnoredPeers();
+      if (ignored.length === 0) {
+        reply('No ignored peers');
+      } else {
+        reply('Ignored peers:');
+        ignored.forEach((peer) => reply('  ' + peer));
+      }
+      return;
+    }
+
     reply('Unknown command: ' + cmd + ' (type /help for commands)');
   };
 

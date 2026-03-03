@@ -45,6 +45,9 @@ Type these in the message input:
 
 - `@peer message` — Send DM to specific peer
 - `/peers` — List online peers with full pubkeys
+- `/ignore <pubkey>` — Ignore inbound messages from a peer
+- `/unignore <pubkey>` — Remove peer from ignored list
+- `/ignored` — List currently ignored peers
 - `/clear` — Clear message history
 - `/help` — Show command reference
 
@@ -69,6 +72,27 @@ Uses Agora config at `~/.config/agora/config.json`. Set default relay:
 | `--name <name>` | Display name broadcast to peers |
 | `--config <path>` | Path to Agora config file |
 | `--storage-dir <path>` | Directory for conversation/sent history |
+| `--rate-limit-enabled <bool>` | Enable inbound per-sender rate limiting (default: true) |
+| `--rate-limit-max-messages <n>` | Max inbound messages per sender in window (default: 10) |
+| `--rate-limit-window-ms <n>` | Inbound rate-limit window in ms (default: 60000) |
+| `--dedup-enabled <bool>` | Enable inbound envelope ID deduplication (default: true) |
+| `--dedup-max-ids <n>` | Max envelope IDs retained for dedup (default: 1000) |
+| `--content-dedup-enabled <bool>` | Enable inbound content deduplication (default: true) |
+| `--content-dedup-window-ms <n>` | Inbound content dedup window in ms (default: 1800000) |
+| `--ignore-peers <csv>` | Comma-separated public keys to ignore at startup |
+
+## Security Environment Variables
+
+You can configure the same inbound protections in `.env`:
+
+- `AGORA_UI_RATE_LIMIT_ENABLED`
+- `AGORA_UI_RATE_LIMIT_MAX_MESSAGES`
+- `AGORA_UI_RATE_LIMIT_WINDOW_MS`
+- `AGORA_UI_DEDUP_ENABLED`
+- `AGORA_UI_DEDUP_MAX_IDS`
+- `AGORA_UI_CONTENT_DEDUP_ENABLED`
+- `AGORA_UI_CONTENT_DEDUP_WINDOW_MS`
+- `AGORA_UI_IGNORED_PEERS` (comma-separated)
 
 ## License
 

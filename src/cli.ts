@@ -5,10 +5,26 @@ import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/a
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
 import { getSentPath } from './sent.js';
+import type { SecurityOptions } from './types.js';
 
-function parseArgs(): { relay?: string; config?: string; name?: string; storageDir?: string; port?: number } {
+interface CliArgs extends SecurityOptions {
+  relay?: string;
+  config?: string;
+  name?: string;
+  storageDir?: string;
+  port?: number;
+}
+
+function parseBooleanArg(value: string): boolean | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return undefined;
+}
+
+function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
-  const result: { relay?: string; config?: string; name?: string; storageDir?: string; port?: number } = {};
+  const result: CliArgs = {};
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--relay' && args[i + 1]) {
@@ -30,6 +46,34 @@ function parseArgs(): { relay?: string; config?: string; name?: string; storageD
         process.exit(1);
       }
       result.port = p;
+      i++;
+    } else if (args[i] === '--rate-limit-enabled' && args[i + 1]) {
+      result.rateLimitEnabled = parseBooleanArg(args[i + 1]);
+      i++;
+    } else if (args[i] === '--rate-limit-max-messages' && args[i + 1]) {
+      const parsed = Number.parseInt(args[i + 1], 10);
+      if (!Number.isNaN(parsed) && parsed > 0) result.rateLimitMaxMessages = parsed;
+      i++;
+    } else if (args[i] === '--rate-limit-window-ms' && args[i + 1]) {
+      const parsed = Number.parseInt(args[i + 1], 10);
+      if (!Number.isNaN(parsed) && parsed > 0) result.rateLimitWindowMs = parsed;
+      i++;
+    } else if (args[i] === '--dedup-enabled' && args[i + 1]) {
+      result.envelopeDedupEnabled = parseBooleanArg(args[i + 1]);
+      i++;
+    } else if (args[i] === '--dedup-max-ids' && args[i + 1]) {
+      const parsed = Number.parseInt(args[i + 1], 10);
+      if (!Number.isNaN(parsed) && parsed > 0) result.envelopeDedupMaxIds = parsed;
+      i++;
+    } else if (args[i] === '--content-dedup-enabled' && args[i + 1]) {
+      result.contentDedupEnabled = parseBooleanArg(args[i + 1]);
+      i++;
+    } else if (args[i] === '--content-dedup-window-ms' && args[i + 1]) {
+      const parsed = Number.parseInt(args[i + 1], 10);
+      if (!Number.isNaN(parsed) && parsed > 0) result.contentDedupWindowMs = parsed;
+      i++;
+    } else if (args[i] === '--ignore-peers' && args[i + 1]) {
+      result.ignoredPeers = args[i + 1].split(',').map((peer) => peer.trim()).filter(Boolean);
       i++;
     }
   }
@@ -66,6 +110,17 @@ function main() {
     const conversationPath = getConversationPath(storageDir);
     const sentPath = getSentPath(storageDir);
 
+    const securityOptions: SecurityOptions = {
+      rateLimitEnabled: cliArgs.rateLimitEnabled ?? env.rateLimitEnabled,
+      rateLimitMaxMessages: cliArgs.rateLimitMaxMessages ?? env.rateLimitMaxMessages,
+      rateLimitWindowMs: cliArgs.rateLimitWindowMs ?? env.rateLimitWindowMs,
+      envelopeDedupEnabled: cliArgs.envelopeDedupEnabled ?? env.envelopeDedupEnabled,
+      envelopeDedupMaxIds: cliArgs.envelopeDedupMaxIds ?? env.envelopeDedupMaxIds,
+      contentDedupEnabled: cliArgs.contentDedupEnabled ?? env.contentDedupEnabled,
+      contentDedupWindowMs: cliArgs.contentDedupWindowMs ?? env.contentDedupWindowMs,
+      ignoredPeers: [...new Set([...(env.ignoredPeers ?? []), ...(cliArgs.ignoredPeers ?? [])])],
+    };
+
     startWebServer({
       relayUrl,
       publicKey: config.identity.publicKey,
@@ -76,6 +131,7 @@ function main() {
       conversationPath,
       sentPath,
       port: cliArgs.port,
+      security: securityOptions,
     });
   } catch (error) {
     console.error('Error starting Agora UI:');

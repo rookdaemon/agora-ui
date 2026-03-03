@@ -33,7 +33,7 @@ describe('Message Parsing', () => {
 });
 
 describe('Command Parsing', () => {
-  const commands = ['/quit', '/exit', '/clear', '/help', '/peers'];
+  const commands = ['/quit', '/exit', '/clear', '/help', '/peers', '/ignored', '/ignore abc', '/unignore abc'];
   
   it('should recognize valid commands', () => {
     commands.forEach(cmd => {
