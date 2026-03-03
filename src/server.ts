@@ -83,6 +83,12 @@ const HTML = `<!DOCTYPE html>
     .tab { padding: 6px 14px; font-size: 0.82rem; cursor: pointer; border: none; background: transparent; color: #8b949e; font-family: inherit; transition: background 0.15s, color 0.15s; }
     .tab:hover { background: #21262d; color: #c9d1d9; }
     .tab-active { background: #21262d; color: #58a6ff; font-weight: 600; }
+    .tab-wrap { display: inline-flex; align-items: center; }
+    .tab-peer { display: inline-flex; align-items: center; gap: 6px; }
+    .tab-ignored { color: #f85149; }
+    .tab-toggle { background: transparent; border: none; color: #8b949e; cursor: pointer; font-family: inherit; font-size: 0.72rem; padding: 0; }
+    .tab-toggle:hover { color: #58a6ff; text-decoration: underline; }
+    .tab-toggle-active { color: #f85149; }
     .messages { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
     .messages-empty { color: #484f58; font-style: italic; font-size: 0.88rem; margin: auto; }
     .msg { font-size: 0.88rem; line-height: 1.5; padding: 1px 0; display: flex; gap: 8px; }
@@ -117,7 +123,7 @@ function formatTime(ts) {
   return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick, onToggleIgnore }) {
+function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick }) {
   const statusClass = status === 'connected' ? 'status-connected'
     : status === 'connecting' ? 'status-connecting' : 'status-disconnected';
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
@@ -135,12 +141,6 @@ function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick, onTo
               <span key={p.key} className="peer-item">
                 {i > 0 && ', '}
                 <a className="peer-link" onClick={() => onPeerClick(p)}>{p.name}</a>
-                <button
-                  className={'peer-toggle' + (ignoredPeers.includes(p.key) ? ' peer-toggle-active' : '')}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleIgnore(p.key); }}
-                >
-                  {ignoredPeers.includes(p.key) ? 'Unignore' : 'Ignore'}
-                </button>
               </span>
             ))
           : <span className="peers-empty">No peers online</span>
@@ -157,9 +157,8 @@ function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick, onTo
                 const label = match?.name || ('...' + key.slice(-8));
                 return (
                   <span key={key} className="ignored-item">
-                    <span className="ignored-name">{label}</span>
+                    <a className="peer-link ignored-name" onClick={() => onPeerClick({ key, name: label })}>{label}</a>
                     <span className="ignored-key">({key.slice(0, 10)}…)</span>
-                    <button className="peer-toggle peer-toggle-active" onClick={() => onToggleIgnore(key)}>Unignore</button>
                   </span>
                 );
               })}
@@ -242,7 +241,29 @@ function App() {
     bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeTab]);
 
-  const tabs = [{ id: 'all', label: 'All' }, ...dmPeers.map(p => ({ id: p.key, label: p.name }))];
+  const visibleOnlinePeers = peers.filter((peer) => !ignoredPeers.includes(peer.key));
+  const allPeerMap = new Map();
+  peers.forEach((peer) => allPeerMap.set(peer.key, { key: peer.key, name: peer.name, ignored: ignoredPeers.includes(peer.key) }));
+  dmPeers.forEach((peer) => {
+    if (!allPeerMap.has(peer.key)) {
+      allPeerMap.set(peer.key, { key: peer.key, name: peer.name, ignored: ignoredPeers.includes(peer.key) });
+    }
+  });
+  ignoredPeers.forEach((key) => {
+    if (!allPeerMap.has(key)) {
+      allPeerMap.set(key, { key, name: '...' + key.slice(-8), ignored: true });
+    } else {
+      const existing = allPeerMap.get(key);
+      allPeerMap.set(key, { ...existing, ignored: true });
+    }
+  });
+
+  const tabs = [{ id: 'all', label: 'All', peerKey: null, ignored: false }, ...Array.from(allPeerMap.values()).map((peer) => ({
+    id: peer.key,
+    label: peer.name,
+    peerKey: peer.key,
+    ignored: peer.ignored,
+  }))];
 
   const visibleMessages = activeTab === 'all'
     ? messages
@@ -312,13 +333,26 @@ function App() {
 
   return (
     <div className="app">
-      <Header status={status} username={username} onlinePeers={peers} ignoredPeers={ignoredPeers} onPeerClick={openPeerTab} onToggleIgnore={toggleIgnorePeer} />
+      <Header status={status} username={username} onlinePeers={visibleOnlinePeers} ignoredPeers={ignoredPeers} onPeerClick={openPeerTab} />
       {tabs.length > 1 && (
         <div className="tabs">
           {tabs.map(tab => (
-            <button key={tab.id} className={'tab' + (tab.id === activeTab ? ' tab-active' : '')} onClick={() => setActiveTab(tab.id)}>
-              {tab.label}
-            </button>
+            <div key={tab.id} className="tab-wrap">
+              <button
+                className={'tab' + (tab.id === activeTab ? ' tab-active' : '') + (tab.ignored ? ' tab-ignored' : '')}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span className="tab-peer">{tab.label}</span>
+              </button>
+              {tab.peerKey && (
+                <button
+                  className={'tab-toggle' + (tab.ignored ? ' tab-toggle-active' : '')}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleIgnorePeer(tab.peerKey); }}
+                >
+                  {tab.ignored ? 'Unignore' : 'Ignore'}
+                </button>
+              )}
+            </div>
           ))}
         </div>
       )}
