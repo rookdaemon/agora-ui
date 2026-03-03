@@ -7,6 +7,7 @@ import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
+import { getIgnoredPath, loadIgnoredPeers, saveIgnoredPeers } from './ignored.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
 import { InboundMessageGuard } from './security.js';
@@ -20,6 +21,7 @@ export interface WebServerOptions {
   configPeers: Record<string, AgoraPeerConfig>;
   conversationPath?: string;
   sentPath?: string;
+  ignoredPath?: string;
   port?: number;
   security?: SecurityOptions;
 }
@@ -344,7 +346,7 @@ function App() {
               >
                 <span className="tab-peer">{tab.label}</span>
               </button>
-              {tab.peerKey && (
+              {tab.peerKey && tab.id === activeTab && (
                 <button
                   className={'tab-toggle' + (tab.ignored ? ' tab-toggle-active' : '')}
                   onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleIgnorePeer(tab.peerKey); }}
@@ -389,13 +391,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 export function startWebServer(options: WebServerOptions): void {
   const {
     relayUrl, publicKey, privateKey, username, broadcastName,
-    configPeers, conversationPath, sentPath, port = 3000,
+    configPeers, conversationPath, sentPath, ignoredPath, port = 3000,
     security,
   } = options;
 
   const messages: Message[] = loadConversation(conversationPath);
   const peers = new Map<string, string>();
-  const guard = new InboundMessageGuard(security);
+  const persistedIgnoredPeers = loadIgnoredPeers(ignoredPath);
+  const mergedIgnoredPeers = [
+    ...new Set([...(persistedIgnoredPeers ?? []), ...((security?.ignoredPeers) ?? [])]),
+  ];
+  const guard = new InboundMessageGuard({ ...security, ignoredPeers: mergedIgnoredPeers });
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const ownDisplayName = formatDisplayName(broadcastName, publicKey);
 
@@ -418,7 +424,9 @@ export function startWebServer(options: WebServerOptions): void {
   const relay = new RelayClient({ relayUrl, publicKey, privateKey, name: broadcastName });
 
   const broadcastIgnoredPeers = (): void => {
-    broadcastToClients({ type: 'ignored_peers', peers: guard.listIgnoredPeers() });
+    const ignored = guard.listIgnoredPeers();
+    try { saveIgnoredPeers(ignored, ignoredPath); } catch { /* ignore */ }
+    broadcastToClients({ type: 'ignored_peers', peers: ignored });
   };
 
   const isIgnoredPeer = (peerKey: string): boolean => guard.listIgnoredPeers().includes(peerKey);
@@ -675,6 +683,7 @@ export function startWebServer(options: WebServerOptions): void {
     const url = 'http://localhost:' + port;
     console.log('Agora Chat running at ' + url);
     console.log('Conversation file: ' + (conversationPath ?? getConversationPath()));
+    console.log('Ignored peers file: ' + (ignoredPath ?? getIgnoredPath()));
     openBrowser(url);
   });
 

@@ -1,0 +1,40 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { getIgnoredPath, loadIgnoredPeers, saveIgnoredPeers, IGNORED_FILE_NAME } from '../ignored.js';
+
+const TEST_DIR = join(tmpdir(), 'agora-ui-ignored-test');
+const TEST_FILE = join(TEST_DIR, IGNORED_FILE_NAME);
+
+describe('ignored peers persistence', () => {
+  beforeEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+    mkdirSync(TEST_DIR, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
+  });
+
+  it('builds ignored path from storage dir', () => {
+    expect(getIgnoredPath(TEST_DIR)).toBe(TEST_FILE);
+  });
+
+  it('returns empty list when file is absent', () => {
+    expect(loadIgnoredPeers(TEST_FILE)).toEqual([]);
+  });
+
+  it('saves unique sorted peers with header', () => {
+    saveIgnoredPeers(['peer-b', 'peer-a', 'peer-b'], TEST_FILE);
+    const content = readFileSync(TEST_FILE, 'utf-8');
+    expect(content).toContain('# Ignored peers');
+    const loaded = loadIgnoredPeers(TEST_FILE);
+    expect(loaded).toEqual(['peer-a', 'peer-b']);
+  });
+
+  it('ignores comments and blank lines on load', () => {
+    writeFileSync(TEST_FILE, '# comment\n\npeer-a\npeer-b\n', 'utf-8');
+    expect(loadIgnoredPeers(TEST_FILE)).toEqual(['peer-a', 'peer-b']);
+  });
+});
