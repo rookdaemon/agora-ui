@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
-import { getIgnoredPeersPath, loadIgnoredPeers, saveIgnoredPeers } from '@rookdaemon/agora';
+import { getIgnoredPeersPath, IgnoredPeersManager } from '@rookdaemon/agora';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
@@ -397,11 +397,11 @@ export function startWebServer(options: WebServerOptions): void {
 
   const messages: Message[] = loadConversation(conversationPath);
   const peers = new Map<string, string>();
-  const persistedIgnoredPeers = loadIgnoredPeers(ignoredPath);
-  const mergedIgnoredPeers = [
-    ...new Set([...(persistedIgnoredPeers ?? []), ...((security?.ignoredPeers) ?? [])]),
-  ];
-  const guard = new InboundMessageGuard({ ...security, ignoredPeers: mergedIgnoredPeers });
+  const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
+  for (const peer of security?.ignoredPeers ?? []) {
+    ignoredPeersManager.ignorePeer(peer);
+  }
+  const guard = new InboundMessageGuard({ ...security, ignoredPeers: ignoredPeersManager.listIgnoredPeers() });
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const ownDisplayName = formatDisplayName(broadcastName, publicKey);
 
@@ -425,7 +425,6 @@ export function startWebServer(options: WebServerOptions): void {
 
   const broadcastIgnoredPeers = (): void => {
     const ignored = guard.listIgnoredPeers();
-    try { saveIgnoredPeers(ignored, ignoredPath); } catch { /* ignore */ }
     broadcastToClients({ type: 'ignored_peers', peers: ignored });
   };
 
@@ -528,6 +527,9 @@ export function startWebServer(options: WebServerOptions): void {
         handleCommand(parsed.text, ws);
       } else if (parsed.type === 'ignore_peer' && parsed.peerKey) {
         const added = guard.ignorePeer(parsed.peerKey);
+        if (added) {
+          ignoredPeersManager.ignorePeer(parsed.peerKey);
+        }
         ws.send(JSON.stringify({
           type: 'system',
           text: added ? ('Ignoring peer ' + parsed.peerKey) : ('Peer already ignored: ' + parsed.peerKey),
@@ -536,6 +538,9 @@ export function startWebServer(options: WebServerOptions): void {
         broadcastIgnoredPeers();
       } else if (parsed.type === 'unignore_peer' && parsed.peerKey) {
         const removed = guard.unignorePeer(parsed.peerKey);
+        if (removed) {
+          ignoredPeersManager.unignorePeer(parsed.peerKey);
+        }
         ws.send(JSON.stringify({
           type: 'system',
           text: removed ? ('Removed ignored peer ' + parsed.peerKey) : ('Peer was not ignored: ' + parsed.peerKey),
@@ -647,6 +652,9 @@ export function startWebServer(options: WebServerOptions): void {
         return;
       }
       const added = guard.ignorePeer(key);
+      if (added) {
+        ignoredPeersManager.ignorePeer(key);
+      }
       reply(added ? ('Ignoring peer ' + key) : ('Peer already ignored: ' + key));
       broadcastIgnoredPeers();
       return;
@@ -660,6 +668,9 @@ export function startWebServer(options: WebServerOptions): void {
         return;
       }
       const removed = guard.unignorePeer(key);
+      if (removed) {
+        ignoredPeersManager.unignorePeer(key);
+      }
       reply(removed ? ('Removed ignored peer ' + key) : ('Peer was not ignored: ' + key));
       broadcastIgnoredPeers();
       return;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { getIgnoredPeersPath, loadIgnoredPeers, saveIgnoredPeers, IGNORED_FILE_NAME } from '@rookdaemon/agora';
+import { getIgnoredPeersPath, IgnoredPeersManager, IGNORED_FILE_NAME } from '@rookdaemon/agora';
 
 const TEST_DIR = join(tmpdir(), 'agora-ui-ignored-test');
 const TEST_FILE = join(TEST_DIR, IGNORED_FILE_NAME);
@@ -22,19 +22,23 @@ describe('ignored peers persistence', () => {
   });
 
   it('returns empty list when file is absent', () => {
-    expect(loadIgnoredPeers(TEST_FILE)).toEqual([]);
+    const manager = new IgnoredPeersManager(TEST_FILE);
+    expect(manager.listIgnoredPeers()).toEqual([]);
   });
 
-  it('saves unique sorted peers with header', () => {
-    saveIgnoredPeers(['peer-b', 'peer-a', 'peer-b'], TEST_FILE);
+  it('persists unique sorted peers with header', () => {
+    const manager = new IgnoredPeersManager(TEST_FILE);
+    manager.ignorePeer('peer-b');
+    manager.ignorePeer('peer-a');
+    manager.ignorePeer('peer-b');
     const content = readFileSync(TEST_FILE, 'utf-8');
     expect(content).toContain('# Ignored peers');
-    const loaded = loadIgnoredPeers(TEST_FILE);
-    expect(loaded).toEqual(['peer-a', 'peer-b']);
+    expect(manager.listIgnoredPeers()).toEqual(['peer-a', 'peer-b']);
   });
 
   it('ignores comments and blank lines on load', () => {
     writeFileSync(TEST_FILE, '# comment\n\npeer-a\npeer-b\n', 'utf-8');
-    expect(loadIgnoredPeers(TEST_FILE)).toEqual(['peer-a', 'peer-b']);
+    const manager = new IgnoredPeersManager(TEST_FILE);
+    expect(manager.listIgnoredPeers()).toEqual(['peer-a', 'peer-b']);
   });
 });
