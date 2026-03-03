@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { getIgnoredPath, loadIgnoredPeers, saveIgnoredPeers, IGNORED_FILE_NAME } from '../ignored.js';
+import { getIgnoredPeersPath, loadIgnoredPeers, saveIgnoredPeers, IGNORED_FILE_NAME } from '@rookdaemon/agora';
 
 const TEST_DIR = join(tmpdir(), 'agora-ui-ignored-test');
 const TEST_FILE = join(TEST_DIR, IGNORED_FILE_NAME);
@@ -18,7 +18,7 @@ describe('ignored peers persistence', () => {
   });
 
   it('builds ignored path from storage dir', () => {
-    expect(getIgnoredPath(TEST_DIR)).toBe(TEST_FILE);
+    expect(getIgnoredPeersPath(TEST_DIR)).toBe(TEST_FILE);
   });
 
   it('returns empty list when file is absent', () => {

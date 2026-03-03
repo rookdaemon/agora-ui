@@ -4,10 +4,10 @@ import { exec } from 'child_process';
 import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
+import { getIgnoredPeersPath, loadIgnoredPeers, saveIgnoredPeers } from '@rookdaemon/agora';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
-import { getIgnoredPath, loadIgnoredPeers, saveIgnoredPeers } from './ignored.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
 import { InboundMessageGuard } from './security.js';
@@ -683,7 +683,7 @@ export function startWebServer(options: WebServerOptions): void {
     const url = 'http://localhost:' + port;
     console.log('Agora Chat running at ' + url);
     console.log('Conversation file: ' + (conversationPath ?? getConversationPath()));
-    console.log('Ignored peers file: ' + (ignoredPath ?? getIgnoredPath()));
+    console.log('Ignored peers file: ' + (ignoredPath ?? getIgnoredPeersPath()));
     openBrowser(url);
   });
 

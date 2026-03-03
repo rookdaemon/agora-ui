@@ -2,10 +2,10 @@
 import { startWebServer } from './server.js';
 import { loadConfig, getRelayUrl } from './config.js';
 import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
+import { getIgnoredPeersPath } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
 import { getSentPath } from './sent.js';
-import { getIgnoredPath } from './ignored.js';
 import type { SecurityOptions } from './types.js';
 
 interface CliArgs extends SecurityOptions {
@@ -110,7 +110,7 @@ function main() {
     // Resolve conversation file path from storage dir (CLI > .env > default agora config dir)
     const conversationPath = getConversationPath(storageDir);
     const sentPath = getSentPath(storageDir);
-    const ignoredPath = getIgnoredPath(storageDir);
+    const ignoredPath = getIgnoredPeersPath(storageDir);
 
     const securityOptions: SecurityOptions = {
       rateLimitEnabled: cliArgs.rateLimitEnabled ?? env.rateLimitEnabled,
