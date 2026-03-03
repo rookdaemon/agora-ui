@@ -421,6 +421,8 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'ignored_peers', peers: guard.listIgnoredPeers() });
   };
 
+  const isIgnoredPeer = (peerKey: string): boolean => guard.listIgnoredPeers().includes(peerKey);
+
   relay.on('connected', () => {
     relayStatus = 'connected';
     broadcastToClients({ type: 'status', value: 'connected' });
@@ -474,6 +476,9 @@ export function startWebServer(options: WebServerOptions): void {
     const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
     peers.set(peer.publicKey, displayName);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
+    if (isIgnoredPeer(peer.publicKey)) {
+      return;
+    }
     broadcastToClients({ type: 'system', text: displayName + ' came online', timestamp: Date.now() });
   });
 
@@ -481,6 +486,9 @@ export function startWebServer(options: WebServerOptions): void {
     const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
     peers.delete(peer.publicKey);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
+    if (isIgnoredPeer(peer.publicKey)) {
+      return;
+    }
     broadcastToClients({ type: 'system', text: displayName + ' went offline', timestamp: Date.now() });
   });
 
