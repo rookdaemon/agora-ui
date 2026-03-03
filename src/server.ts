@@ -5,7 +5,7 @@ import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
-import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
+import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
@@ -560,6 +560,7 @@ export function startWebServer(options: WebServerOptions): void {
   httpServer.listen(port, () => {
     const url = 'http://localhost:' + port;
     console.log('Agora Chat running at ' + url);
+    console.log('Conversation file: ' + (conversationPath ?? getConversationPath()));
     openBrowser(url);
   });
 
