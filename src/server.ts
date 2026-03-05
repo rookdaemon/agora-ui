@@ -220,6 +220,12 @@ function App() {
         }
       } else if (data.type === 'system') {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
+      } else if (data.type === 'group_tab') {
+        if (data.recipients && data.recipients.length > 0) {
+          upsertGroupTab(data.recipients);
+        } else {
+          setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
+        }
       } else if (data.type === 'peers') {
         setPeers(data.peers);
         setDmPeers(prev => prev.map(dp => {
@@ -329,21 +335,12 @@ function App() {
     setSentHistory(prev => [...prev, text]);
     setHistoryIndex(-1);
     draftRef.current = '';
-    if (text.startsWith('/group ')) {
-      const refs = text.slice('/group '.length).split(/[\s,]+/).map(v => v.trim()).filter(Boolean);
-      const resolved = Array.from(new Set(refs.map((ref) => {
-        const byKey = peers.find((peer) => peer.key === ref || peer.key.startsWith(ref));
-        if (byKey) return byKey.key;
-        const byName = peers.find((peer) => peer.name && peer.name.startsWith(ref));
-        return byName ? byName.key : null;
-      }).filter(Boolean)));
-      if (resolved.length === 0) {
-        setMessages(prev => [...prev, { from: 'system', text: 'No valid recipients for /group', timestamp: Date.now() }]);
+    if (text.startsWith('/group ') || text.startsWith('/')) {
+      if (text.startsWith('/group ')) {
+        ws.send(JSON.stringify({ type: 'group_resolve', text }));
       } else {
-        upsertGroupTab(resolved);
+        ws.send(JSON.stringify({ type: 'command', text }));
       }
-    } else if (text.startsWith('/')) {
-      ws.send(JSON.stringify({ type: 'command', text }));
     } else if (activeTab !== 'inbox' && !text.startsWith('@')) {
       if (activeTabMeta && activeTabMeta.recipients.length > 1) {
         ws.send(JSON.stringify({ type: 'group_send', text, recipients: activeTabMeta.recipients }));
@@ -572,6 +569,8 @@ export function startWebServer(options: WebServerOptions): void {
         handleDmSend(parsed.text, parsed.peerKey);
       } else if (parsed.type === 'group_send' && parsed.text && parsed.recipients && parsed.recipients.length > 0) {
         handleGroupSend(parsed.text, parsed.recipients);
+      } else if (parsed.type === 'group_resolve' && parsed.text) {
+        handleGroupResolve(parsed.text, ws);
       } else if (parsed.type === 'command' && parsed.text) {
         handleCommand(parsed.text, ws);
       } else if (parsed.type === 'ignore_peer' && parsed.peerKey) {
@@ -620,7 +619,7 @@ export function startWebServer(options: WebServerOptions): void {
       if (peerEntry) {
         const [peerKey] = peerEntry;
         const expandedText = expandInlineRefs(dmText, configPeers);
-        const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
+        const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, peerKey);
         relay.send(peerKey, envelope);
         const dmMsg: Message = {
           from: ownDisplayName,
@@ -650,7 +649,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers);
-    const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
+    const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, peerKey);
     relay.send(peerKey, envelope);
     const dmMsg: Message = {
       from: ownDisplayName,
@@ -680,7 +679,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const expandedText = expandInlineRefs(text, configPeers);
     for (const recipient of uniqueRecipients) {
-      const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
+      const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, recipient);
       relay.send(recipient, envelope);
 
       const dmMsg: Message = {
@@ -693,6 +692,28 @@ export function startWebServer(options: WebServerOptions): void {
       messages.push(dmMsg);
       try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
       broadcastToClients({ type: 'message', ...dmMsg });
+    }
+  };
+
+  const handleGroupResolve = (text: string, ws: WebSocket): void => {
+    const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
+    const resolved = Array.from(new Set(refs.map((ref) => {
+      const byConfig = expandPeerRef(ref, configPeers);
+      if (byConfig) return byConfig;
+      for (const [peerKey, displayName] of peers.entries()) {
+        if (peerKey.startsWith(ref) || displayName.startsWith(ref) || displayName.includes(ref)) {
+          return peerKey;
+        }
+        if (ref.startsWith('...') && peerKey.endsWith(ref.slice(3))) {
+          return peerKey;
+        }
+      }
+      return null;
+    }).filter(Boolean) as string[]));
+    if (resolved.length === 0) {
+      ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group' }));
+    } else {
+      ws.send(JSON.stringify({ type: 'group_tab', recipients: resolved }));
     }
   };
 

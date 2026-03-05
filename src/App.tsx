@@ -317,7 +317,8 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         privateKey,
         { text: expandedText, dm: true },
         Date.now(),
-        undefined
+        undefined,
+        recipient
       );
       void relay.send(recipient, envelope);
 
