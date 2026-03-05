@@ -321,18 +321,18 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         recipient
       );
       void relay.send(recipient, envelope);
-
-      const ownDisplayName = formatDisplayName(broadcastName, publicKey);
-      const msg: Message = {
-        from: ownDisplayName,
-        text: compactInlineRefs(expandedText, configPeers),
-        timestamp: Date.now(),
-        isDM: true,
-        peer: recipient,
-      };
-      setChatMessages((prev) => trimMessages([...prev, msg]));
-      try { appendToConversation(msg, conversationPath); } catch {}
     }
+
+    const ownDisplayName = formatDisplayName(broadcastName, publicKey);
+    const msg: Message = {
+      from: ownDisplayName,
+      text: compactInlineRefs(expandedText, configPeers),
+      timestamp: Date.now(),
+      isDM: true,
+      peer: cleanedRecipients[0],
+    };
+    setChatMessages((prev) => trimMessages([...prev, msg]));
+    try { appendToConversation(msg, conversationPath); } catch {}
   };
 
   const handleSubmit = (value: string): void => {

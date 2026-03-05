@@ -681,18 +681,18 @@ export function startWebServer(options: WebServerOptions): void {
     for (const recipient of uniqueRecipients) {
       const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, recipient);
       relay.send(recipient, envelope);
-
-      const dmMsg: Message = {
-        from: ownDisplayName,
-        text: compactInlineRefs(expandedText, configPeers),
-        timestamp: Date.now(),
-        isDM: true,
-        peer: recipient,
-      };
-      messages.push(dmMsg);
-      try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
-      broadcastToClients({ type: 'message', ...dmMsg });
     }
+
+    const groupMsg: Message = {
+      from: ownDisplayName,
+      text: compactInlineRefs(expandedText, configPeers),
+      timestamp: Date.now(),
+      isDM: true,
+      peer: uniqueRecipients[0],
+    };
+    messages.push(groupMsg);
+    try { appendToConversation(groupMsg, conversationPath); } catch { /* ignore */ }
+    broadcastToClients({ type: 'message', ...groupMsg });
   };
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
