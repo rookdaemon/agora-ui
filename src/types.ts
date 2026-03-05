@@ -1,4 +1,5 @@
 import type { AgoraConfig as AgoraConfigLoaded } from '@rookdaemon/agora';
+import type { InboundSecurityOptions } from './security.js';
 
 export interface Identity {
   publicKey: string;
@@ -27,13 +28,4 @@ export interface PeerInfo {
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
-export interface SecurityOptions {
-  rateLimitEnabled?: boolean;
-  rateLimitMaxMessages?: number;
-  rateLimitWindowMs?: number;
-  envelopeDedupEnabled?: boolean;
-  envelopeDedupMaxIds?: number;
-  contentDedupEnabled?: boolean;
-  contentDedupWindowMs?: number;
-  ignoredPeers?: string[];
-}
+export type SecurityOptions = InboundSecurityOptions;
