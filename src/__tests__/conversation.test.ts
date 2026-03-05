@@ -116,7 +116,7 @@ describe('parseMessageLine', () => {
   });
 
   it('roundtrips through format and parse', () => {
-    const original = makeMessage('Dave (...abc12345)', 'test message', 1700000000000);
+    const original = makeMessage('Dave...abc12345', 'test message', 1700000000000);
     const line = formatMessageLine(original);
     const parsed = parseMessageLine(line);
     expect(parsed).not.toBeNull();

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import { RelayClient, createEnvelope } from '@rookdaemon/agora';
+import { RelayClient } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { Header } from './components/Header.js';
@@ -8,7 +8,7 @@ import { MessageList } from './components/MessageList.js';
 import { Input } from './components/Input.js';
 import { Tabs } from './components/Tabs.js';
 import type { TabItem } from './components/Tabs.js';
-import { compactInlineRefs, expandInlineRefs, expandPeerRef, formatDisplayName, resolveDisplayName, sanitizeText, shortenPeerId } from './utils.js';
+import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
 import { appendToSent, loadSent } from './sent.js';
 import type { Message, ConnectionStatus } from './types.js';
@@ -28,14 +28,6 @@ interface GroupTab {
   id: string;
   recipients: string[];
   label: string;
-}
-
-function extractTextFromPayload(payload: unknown): string {
-  if (payload && typeof payload === 'object' && 'text' in payload && typeof (payload as { text: unknown }).text === 'string') {
-    return sanitizeText((payload as { text: string }).text);
-  }
-  if (typeof payload === 'string') return sanitizeText(payload);
-  return sanitizeText(JSON.stringify(payload ?? ''));
 }
 
 function trimMessages(msgs: Message[]): Message[] {
@@ -310,18 +302,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     }
 
     const expandedText = expandInlineRefs(rawText, configPeers);
-    for (const recipient of cleanedRecipients) {
-      const envelope = createEnvelope(
-        'publish',
-        publicKey,
-        privateKey,
-        { text: expandedText, dm: true },
-        Date.now(),
-        undefined,
-        recipient
-      );
-      void relay.send(recipient, envelope);
-    }
+    void relay.sendToRecipients(cleanedRecipients, 'publish', { text: expandedText, dm: true });
 
     const ownDisplayName = formatDisplayName(broadcastName, publicKey);
     const msg: Message = {

@@ -1,11 +1,11 @@
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { exec } from 'child_process';
-import { RelayClient, createEnvelope } from '@rookdaemon/agora';
+import { RelayClient } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, IgnoredPeersManager } from '@rookdaemon/agora';
-import { compactInlineRefs, expandInlineRefs, expandPeerRef, formatDisplayName, resolveDisplayName, sanitizeText, shortenPeerId } from './utils.js';
+import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
@@ -24,14 +24,6 @@ export interface WebServerOptions {
   ignoredPath?: string;
   port?: number;
   security?: SecurityOptions;
-}
-
-function extractTextFromPayload(payload: unknown): string {
-  if (payload && typeof payload === 'object' && 'text' in payload && typeof (payload as { text: unknown }).text === 'string') {
-    return sanitizeText((payload as { text: string }).text);
-  }
-  if (typeof payload === 'string') return sanitizeText(payload);
-  return sanitizeText(JSON.stringify(payload ?? ''));
 }
 
 function openBrowser(url: string): void {
@@ -619,8 +611,7 @@ export function startWebServer(options: WebServerOptions): void {
       if (peerEntry) {
         const [peerKey] = peerEntry;
         const expandedText = expandInlineRefs(dmText, configPeers);
-        const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, peerKey);
-        relay.send(peerKey, envelope);
+        void relay.sendToRecipients([peerKey], 'publish', { text: expandedText, dm: true });
         const dmMsg: Message = {
           from: ownDisplayName,
           text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
@@ -649,8 +640,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers);
-    const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, peerKey);
-    relay.send(peerKey, envelope);
+    void relay.sendToRecipients([peerKey], 'publish', { text: expandedText, dm: true });
     const dmMsg: Message = {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
@@ -678,10 +668,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers);
-    for (const recipient of uniqueRecipients) {
-      const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined, recipient);
-      relay.send(recipient, envelope);
-    }
+    void relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText, dm: true });
 
     const groupMsg: Message = {
       from: ownDisplayName,

@@ -27,7 +27,7 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
     if (from === myDisplayName || from === myPublicKey) {
       return 'You';
     }
-    // Display name is already formatted (name (...3f8c2247) or ...3f8c2247)
+    // Display name is already formatted (name...3f8c2247 or ...3f8c2247)
     return from;
   };
 
