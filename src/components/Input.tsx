@@ -50,7 +50,7 @@ export function Input({ value, onChange, onSubmit, sentHistory = [] }: InputProp
         value={value}
         onChange={onChange}
         onSubmit={handleSubmit}
-        placeholder="Type message (@peer for DM, /help for commands)"
+        placeholder="Type message (@peer or /group ..., /help for commands)"
       />
     </Box>
   );

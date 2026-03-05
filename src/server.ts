@@ -5,7 +5,7 @@ import { RelayClient, createEnvelope } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, IgnoredPeersManager } from '@rookdaemon/agora';
-import { resolveDisplayName, formatDisplayName, sanitizeText } from './utils.js';
+import { compactInlineRefs, expandInlineRefs, expandPeerRef, formatDisplayName, resolveDisplayName, sanitizeText, shortenPeerId } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
@@ -183,7 +183,7 @@ function MessageItem({ msg, myDisplayName }) {
       <span className="msg-body">
         {!isSystem && <span className={'msg-sender ' + senderClass}>{senderLabel}: </span>}
         <span className="msg-text">{msg.text}</span>
-        {!isSystem && (msg.isDM ? <span className="dm-badge">(DM)</span> : <span className="all-badge">(ALL)</span>)}
+        {!isSystem && <span className="dm-badge">(P2P)</span>}
       </span>
     </div>
   );
@@ -197,8 +197,9 @@ function App() {
   const [input, setInput] = useState('');
   const [sentHistory, setSentHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState('inbox');
   const [dmPeers, setDmPeers] = useState([]);
+  const [groupTabs, setGroupTabs] = useState([]);
   const [ignoredPeers, setIgnoredPeers] = useState([]);
   const draftRef = useRef('');
   const wsRef = useRef(null);
@@ -225,6 +226,12 @@ function App() {
           const match = data.peers.find(p => p.key === dp.key);
           return match ? { ...dp, name: match.name } : dp;
         }));
+        setGroupTabs(prev => prev.map(group => ({
+          ...group,
+          label: group.recipients
+            .map((peerKey) => data.peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8)))
+            .join(', '),
+        })));
       } else if (data.type === 'info') {
         setUsername(data.username);
       } else if (data.type === 'ignored_peers') {
@@ -260,20 +267,48 @@ function App() {
     }
   });
 
-  const tabs = [{ id: 'all', label: 'All', peerKey: null, ignored: false }, ...Array.from(allPeerMap.values()).map((peer) => ({
+  const peerTabs = Array.from(allPeerMap.values()).map((peer) => ({
     id: peer.key,
     label: peer.name,
     peerKey: peer.key,
+    recipients: [peer.key],
     ignored: peer.ignored,
-  }))];
+  }));
 
-  const visibleMessages = activeTab === 'all'
+  const tabs = [
+    { id: 'inbox', label: 'Inbox', peerKey: null, recipients: [], ignored: false },
+    ...peerTabs,
+    ...groupTabs,
+  ];
+
+  const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
+  const visibleMessages = activeTab === 'inbox'
     ? messages
-    : messages.filter(m => m.from === 'system' || m.peer === activeTab);
+    : messages.filter(m => m.from === 'system' || (m.peer && activeTabMeta && activeTabMeta.recipients.includes(m.peer)));
+
+  const upsertGroupTab = (recipients) => {
+    const unique = Array.from(new Set(recipients)).filter(Boolean).sort();
+    if (unique.length <= 1) {
+      const peerKey = unique[0];
+      if (!peerKey) return;
+      const peerName = peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8));
+      setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerName }]);
+      setActiveTab(peerKey);
+      return;
+    }
+
+    const id = unique.join('|');
+    setGroupTabs(prev => {
+      const existing = prev.find((tab) => tab.id === id);
+      if (existing) return prev;
+      const label = unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8))).join(', ');
+      return [...prev, { id, label, peerKey: null, recipients: unique, ignored: false }];
+    });
+    setActiveTab(id);
+  };
 
   const openPeerTab = (peer) => {
-    setDmPeers(prev => prev.some(p => p.key === peer.key) ? prev : [...prev, peer]);
-    setActiveTab(peer.key);
+    upsertGroupTab([peer.key]);
   };
 
   const toggleIgnorePeer = (peerKey) => {
@@ -294,10 +329,27 @@ function App() {
     setSentHistory(prev => [...prev, text]);
     setHistoryIndex(-1);
     draftRef.current = '';
-    if (text.startsWith('/')) {
+    if (text.startsWith('/group ')) {
+      const refs = text.slice('/group '.length).split(/[\s,]+/).map(v => v.trim()).filter(Boolean);
+      const resolved = Array.from(new Set(refs.map((ref) => {
+        const byKey = peers.find((peer) => peer.key === ref || peer.key.startsWith(ref));
+        if (byKey) return byKey.key;
+        const byName = peers.find((peer) => peer.name && peer.name.startsWith(ref));
+        return byName ? byName.key : null;
+      }).filter(Boolean)));
+      if (resolved.length === 0) {
+        setMessages(prev => [...prev, { from: 'system', text: 'No valid recipients for /group', timestamp: Date.now() }]);
+      } else {
+        upsertGroupTab(resolved);
+      }
+    } else if (text.startsWith('/')) {
       ws.send(JSON.stringify({ type: 'command', text }));
-    } else if (activeTab !== 'all' && !text.startsWith('@')) {
-      ws.send(JSON.stringify({ type: 'dm_send', text, peerKey: activeTab }));
+    } else if (activeTab !== 'inbox' && !text.startsWith('@')) {
+      if (activeTabMeta && activeTabMeta.recipients.length > 1) {
+        ws.send(JSON.stringify({ type: 'group_send', text, recipients: activeTabMeta.recipients }));
+      } else {
+        ws.send(JSON.stringify({ type: 'dm_send', text, peerKey: activeTab }));
+      }
     } else {
       ws.send(JSON.stringify({ type: 'send', text }));
     }
@@ -329,9 +381,9 @@ function App() {
     }
   };
 
-  const tabPlaceholder = activeTab === 'all'
-    ? 'Type message (@peer for DM, /help for commands)'
-    : 'Type message to ' + (dmPeers.find(p => p.key === activeTab)?.name || '…');
+  const tabPlaceholder = activeTab === 'inbox'
+    ? 'Type @peer msg or /group p1,p2 then send'
+    : 'Type message to ' + (activeTabMeta?.label || '...');
 
   return (
     <div className="app">
@@ -462,13 +514,8 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const displayName = formatDisplayName(resolveDisplayName(from, fromName, configPeers), from);
-    const text = extractTextFromPayload(envelope.payload);
-    const isDM = !!(
-      envelope.payload &&
-      typeof envelope.payload === 'object' &&
-      (envelope.payload as Record<string, unknown>).dm === true
-    );
-    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, isDM, peer: isDM ? from : undefined };
+    const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeers);
+    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, isDM: true, peer: from };
     messages.push(msg);
     {
       const lines = messages.map(formatMessageLine);
@@ -513,9 +560,9 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     ws.on('message', (raw) => {
-      let parsed: { type?: string; text?: string; peerKey?: string };
+      let parsed: { type?: string; text?: string; peerKey?: string; recipients?: string[] };
       try {
-        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string; peerKey?: string };
+        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string; peerKey?: string; recipients?: string[] };
       } catch {
         return;
       }
@@ -523,6 +570,8 @@ export function startWebServer(options: WebServerOptions): void {
         handleSend(parsed.text);
       } else if (parsed.type === 'dm_send' && parsed.text && parsed.peerKey) {
         handleDmSend(parsed.text, parsed.peerKey);
+      } else if (parsed.type === 'group_send' && parsed.text && parsed.recipients && parsed.recipients.length > 0) {
+        handleGroupSend(parsed.text, parsed.recipients);
       } else if (parsed.type === 'command' && parsed.text) {
         handleCommand(parsed.text, ws);
       } else if (parsed.type === 'ignore_peer' && parsed.peerKey) {
@@ -562,14 +611,24 @@ export function startWebServer(options: WebServerOptions): void {
     const dmMatch = text.match(/^@(\S+)\s+(.+)$/);
     if (dmMatch) {
       const [, peerName, dmText] = dmMatch;
-      const peerEntry = Array.from(peers.entries()).find(
-        ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
-      );
+      const resolvedFromConfig = expandPeerRef(peerName, configPeers);
+      const peerEntry = resolvedFromConfig
+        ? [resolvedFromConfig, peers.get(resolvedFromConfig) ?? shortenPeerId(resolvedFromConfig, configPeers)] as const
+        : Array.from(peers.entries()).find(
+            ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
+          );
       if (peerEntry) {
         const [peerKey] = peerEntry;
-        const envelope = createEnvelope('publish', publicKey, privateKey, { text: dmText, dm: true });
+        const expandedText = expandInlineRefs(dmText, configPeers);
+        const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
         relay.send(peerKey, envelope);
-        const dmMsg: Message = { from: ownDisplayName, text: '@' + peerName + ': ' + dmText, timestamp: Date.now(), isDM: true, peer: peerKey };
+        const dmMsg: Message = {
+          from: ownDisplayName,
+          text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
+          timestamp: Date.now(),
+          isDM: true,
+          peer: peerKey,
+        };
         messages.push(dmMsg);
         try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
@@ -579,22 +638,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    if (peers.size === 0) {
-      broadcastToClients({ type: 'system', text: 'No peers online to send message to', timestamp: Date.now() });
-      return;
-    }
-
-    const envelope = createEnvelope('publish', publicKey, privateKey, { text });
-    relay.broadcast(envelope);
-    const outMsg: Message = { from: ownDisplayName, text, timestamp: Date.now(), isDM: false };
-    messages.push(outMsg);
-    {
-      const lines = messages.map(formatMessageLine);
-      const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
-      if (trimmed.length < messages.length) messages.splice(0, messages.length - trimmed.length);
-    }
-    try { appendToConversation(outMsg, conversationPath); } catch { /* ignore */ }
-    broadcastToClients({ type: 'message', ...outMsg });
+    broadcastToClients({ type: 'system', text: 'Broadcast is disabled. Use @peer or create a group tab.', timestamp: Date.now() });
   };
 
   const handleDmSend = (text: string, peerKey: string): void => {
@@ -605,12 +649,51 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const envelope = createEnvelope('publish', publicKey, privateKey, { text, dm: true });
+    const expandedText = expandInlineRefs(text, configPeers);
+    const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
     relay.send(peerKey, envelope);
-    const dmMsg: Message = { from: ownDisplayName, text, timestamp: Date.now(), isDM: true, peer: peerKey };
+    const dmMsg: Message = {
+      from: ownDisplayName,
+      text: compactInlineRefs(expandedText, configPeers),
+      timestamp: Date.now(),
+      isDM: true,
+      peer: peerKey,
+    };
     messages.push(dmMsg);
     try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...dmMsg });
+  };
+
+  const handleGroupSend = (text: string, recipients: string[]): void => {
+    try { appendToSent(text, sentPath); } catch { /* ignore */ }
+
+    if (!relay.connected()) {
+      broadcastToClients({ type: 'system', text: 'Not connected to relay', timestamp: Date.now() });
+      return;
+    }
+
+    const uniqueRecipients = Array.from(new Set(recipients.filter(Boolean).filter((id) => id !== publicKey)));
+    if (uniqueRecipients.length === 0) {
+      broadcastToClients({ type: 'system', text: 'Group has no valid recipients', timestamp: Date.now() });
+      return;
+    }
+
+    const expandedText = expandInlineRefs(text, configPeers);
+    for (const recipient of uniqueRecipients) {
+      const envelope = createEnvelope('publish', publicKey, privateKey, { text: expandedText, dm: true }, Date.now(), undefined);
+      relay.send(recipient, envelope);
+
+      const dmMsg: Message = {
+        from: ownDisplayName,
+        text: compactInlineRefs(expandedText, configPeers),
+        timestamp: Date.now(),
+        isDM: true,
+        peer: recipient,
+      };
+      messages.push(dmMsg);
+      try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
+      broadcastToClients({ type: 'message', ...dmMsg });
+    }
   };
 
   const handleCommand = (cmd: string, ws: WebSocket): void => {
@@ -633,7 +716,8 @@ export function startWebServer(options: WebServerOptions): void {
     if (lower === '/help') {
       [
         'Commands:',
-        '  @peer message — Send DM to specific peer',
+        '  @peer message — Send to specific peer',
+        '  /group <peer1,peer2,...> — Create/switch a group tab',
         '  /peers — List online peers with public keys',
         '  /ignore <pubkey> — Ignore inbound messages from a peer',
         '  /unignore <pubkey> — Remove a peer from ignore list',

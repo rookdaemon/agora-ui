@@ -62,3 +62,52 @@ export function formatDisplayName(name: string | undefined, publicKey: string): 
   }
   return `${name} (${shortId})`;
 }
+
+export function shortenPeerId(publicKey: string, configPeers: Record<string, AgoraPeerConfig>): string {
+  const peer = Object.values(configPeers).find((p) => p.publicKey === publicKey);
+  if (!peer?.name) {
+    return shortKey(publicKey);
+  }
+  const duplicates = Object.values(configPeers).filter((p) => p.name === peer.name).length;
+  if (duplicates > 1) {
+    return `${peer.name}...${publicKey.slice(-8)}`;
+  }
+  return peer.name;
+}
+
+export function expandPeerRef(reference: string, configPeers: Record<string, AgoraPeerConfig>): string | undefined {
+  const ref = reference.trim();
+  const direct = Object.values(configPeers).find((p) => p.publicKey === ref);
+  if (direct) {
+    return direct.publicKey;
+  }
+
+  const withSuffix = ref.match(/^(.+)\.\.\.([0-9a-fA-F]{8})$/);
+  if (withSuffix) {
+    const [, name, suffix] = withSuffix;
+    const matches = Object.values(configPeers).filter(
+      (p) => p.name === name && p.publicKey.toLowerCase().endsWith(suffix.toLowerCase())
+    );
+    return matches.length === 1 ? matches[0].publicKey : undefined;
+  }
+
+  if (ref.startsWith('...') && ref.length === 11) {
+    const suffix = ref.slice(3).toLowerCase();
+    const matches = Object.values(configPeers).filter((p) => p.publicKey.toLowerCase().endsWith(suffix));
+    return matches.length === 1 ? matches[0].publicKey : undefined;
+  }
+
+  const byName = Object.values(configPeers).filter((p) => p.name === ref);
+  return byName.length === 1 ? byName[0].publicKey : undefined;
+}
+
+export function expandInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>): string {
+  return text.replace(/@([^\s]+)/g, (_m, token: string) => {
+    const expanded = expandPeerRef(token, configPeers);
+    return expanded ? `@${expanded}` : `@${token}`;
+  });
+}
+
+export function compactInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>): string {
+  return text.replace(/@([0-9a-fA-F]{16,})/g, (_m, id: string) => `@${shortenPeerId(id, configPeers)}`);
+}

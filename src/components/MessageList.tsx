@@ -47,7 +47,7 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
                 {formatSender(msg.from)}:
               </Text>
               <Text> {msg.text}</Text>
-              {!isSystem && (msg.isDM ? <Text dimColor> (DM)</Text> : <Text dimColor> (ALL)</Text>)}
+              {!isSystem && <Text dimColor> (P2P)</Text>}
             </Box>
           );
         })
