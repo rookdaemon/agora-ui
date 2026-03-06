@@ -35,7 +35,7 @@
     "url": "git+https://github.com/rookdaemon/agora-ui.git"
   },
   "dependencies": {
-    "@rookdaemon/agora": "^0.6.3",
+    "@rookdaemon/agora": "^0.6.4",
     "ink": "^5.0.0",
     "ink-text-input": "^6.0.0",
     "react": "^18.2.0",

@@ -10,19 +10,22 @@ const configPeers = {
 };
 
 describe('peer reference helpers', () => {
-  it('uses canonical name...suffix short format when name exists', () => {
-    expect(shortenPeerId(ALICE, configPeers)).toBe('alice...99990000');
+  it('uses canonical name@suffix short format when name exists', () => {
+    expect(shortenPeerId(ALICE, configPeers)).toBe('alice@99990000');
   });
 
   it('expands short references to full IDs', () => {
     expect(expandPeerRef('alice', configPeers)).toBe(ALICE);
+    expect(expandPeerRef('alice@99990000', configPeers)).toBe(ALICE);
+    expect(expandPeerRef('@99990000', configPeers)).toBe(ALICE);
+    // Legacy formats still work
     expect(expandPeerRef('alice...99990000', configPeers)).toBe(ALICE);
     expect(expandPeerRef('...99990000', configPeers)).toBe(ALICE);
   });
 
   it('expands and compacts inline @references', () => {
-    expect(expandInlineRefs('ping @alice...99990000', configPeers)).toBe(`ping @${ALICE}`);
-    expect(compactInlineRefs(`ping @${ALICE}`, configPeers)).toBe('ping @alice...99990000');
+    expect(expandInlineRefs('ping @alice@99990000', configPeers)).toBe(`ping @${ALICE}`);
+    expect(compactInlineRefs(`ping @${ALICE}`, configPeers)).toBe('ping @alice@99990000');
   });
 
   it('leaves unknown inline tokens untouched', () => {
