@@ -1,6 +1,7 @@
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { getDefaultConfigPath } from '@rookdaemon/agora';
+import { getDefaultConfigPath, formatConversationLine, parseConversationLine, shorten, expand } from '@rookdaemon/agora';
+import type { PeerReferenceDirectory } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
 export const MAX_CONVERSATION_BYTES = 4096;
@@ -19,42 +20,33 @@ export function getConversationPath(storageDir?: string): string {
 
 /**
  * Formats a message as a single parsable line.
- * Format: [ISO_TIMESTAMP] [FROM] TEXT
- * DM messages: [ISO_TIMESTAMP] [FROM] [DM] TEXT
+ * Format: [ISO_TIMESTAMP] **FROM:** sender **TO:** recipient1, recipient2 text
  */
-export function formatMessageLine(msg: Message): string {
-  const ts = new Date(msg.timestamp).toISOString();
-  // Replace newlines in text to ensure single-line format
-  const safeText = msg.text.replace(/\r?\n/g, ' ');
-  let dmPrefix = '';
-  if (msg.isDM) {
-    dmPrefix = msg.peer ? `[DM:${msg.peer}] ` : '[DM] ';
-  }
-  return `[${ts}] [${msg.from}] ${dmPrefix}${safeText}`;
+export function formatMessageLine(msg: Message, directory?: PeerReferenceDirectory): string {
+  return formatConversationLine({
+    timestamp: msg.timestamp,
+    from: msg.from,
+    to: (msg.to ?? []).map(key => shorten(key, directory)),
+    text: msg.text,
+  });
 }
 
 /**
  * Parses a single line from CONVERSATION.md into a Message.
- * Returns null if the line cannot be parsed.
+ * Returns null if the line doesn't match the expected format.
  */
-export function parseMessageLine(line: string): Message | null {
-  const match = line.match(/^\[([^\]]+)\] \[([^\]]+)\] (.*)$/);
-  if (!match) return null;
-  const [, ts, from, rest] = match;
-  const timestamp = new Date(ts).getTime();
-  if (isNaN(timestamp)) return null;
-
-  // Check for [DM:peerKey] marker (new format with peer tracking)
-  const dmWithPeerMatch = rest.match(/^\[DM:([^\]]+)\] (.*)/s);
-  if (dmWithPeerMatch) {
-    const [, peer, text] = dmWithPeerMatch;
-    return { from, text, timestamp, isDM: true, peer };
-  }
-  // Check for legacy [DM] marker (no peer info)
-  if (rest.startsWith('[DM] ')) {
-    return { from, text: rest.slice(5), timestamp, isDM: true };
-  }
-  return { from, text: rest, timestamp, isDM: false };
+export function parseMessageLine(line: string, directory?: PeerReferenceDirectory): Message | null {
+  const entry = parseConversationLine(line);
+  if (!entry) return null;
+  const to = directory
+    ? entry.to.map(ref => expand(ref, directory)).filter((v): v is string => Boolean(v))
+    : [];
+  return {
+    from: entry.from,
+    text: entry.text,
+    timestamp: entry.timestamp,
+    to: to.length > 0 ? to : undefined,
+  };
 }
 
 /**
@@ -77,7 +69,7 @@ export function trimToByteLimit(lines: string[], maxBytes: number): string[] {
  * Appends a message to the CONVERSATION.md file.
  * Full history is retained on disk — no truncation.
  */
-export function appendToConversation(msg: Message, filePath?: string): void {
+export function appendToConversation(msg: Message, filePath?: string, directory?: PeerReferenceDirectory): void {
   const path = filePath ?? getConversationPath();
   const dir = dirname(path);
 
@@ -85,7 +77,7 @@ export function appendToConversation(msg: Message, filePath?: string): void {
     mkdirSync(dir, { recursive: true });
   }
 
-  const line = formatMessageLine(msg);
+  const line = formatMessageLine(msg, directory);
 
   // Append-only — no read/rewrite needed
   appendFileSync(path, line + '\n', 'utf-8');
@@ -96,7 +88,7 @@ export function appendToConversation(msg: Message, filePath?: string): void {
  * messages that fit within MAX_CONVERSATION_BYTES (trimmed at even-message
  * boundaries). Full history is preserved on disk.
  */
-export function loadConversation(filePath?: string): Message[] {
+export function loadConversation(filePath?: string, directory?: PeerReferenceDirectory): Message[] {
   const path = filePath ?? getConversationPath();
 
   if (!existsSync(path)) return [];
@@ -105,5 +97,5 @@ export function loadConversation(filePath?: string): Message[] {
   const lines = content.split('\n').filter(l => l.length > 0);
   const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
 
-  return trimmed.map(parseMessageLine).filter((m): m is Message => m !== null);
+  return trimmed.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
 }

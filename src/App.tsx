@@ -31,7 +31,7 @@ interface GroupTab {
 }
 
 function trimMessages(msgs: Message[]): Message[] {
-  const lines = msgs.map(formatMessageLine);
+  const lines = msgs.map(m => formatMessageLine(m));
   const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
   return msgs.slice(msgs.length - trimmed.length);
 }
@@ -70,11 +70,11 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     if (!group) {
       return messages;
     }
-    return messages.filter((msg) => msg.from === 'system' || (msg.peer ? group.recipients.includes(msg.peer) : false));
+    return messages.filter((msg) => msg.from === 'system' || (msg.to?.some(key => group.recipients.includes(key)) ?? false));
   }, [messages, activeTab, groupTabs]);
 
   const addSystemMessage = (text: string): void => {
-    setSystemMessages((prev) => [...prev, { from: 'system', text, timestamp: Date.now(), isDM: false }]);
+    setSystemMessages((prev) => [...prev, { from: 'system', text, timestamp: Date.now() }]);
   };
 
   const resolvePeerRef = (ref: string): string | undefined => {
@@ -134,11 +134,11 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   });
 
   useEffect(() => {
-    const loaded = loadConversation(conversationPath);
+    const loaded = loadConversation(conversationPath, configPeers);
     setChatMessages(loaded);
     for (const msg of loaded) {
-      if (msg.peer) {
-        ensureGroupTab([msg.peer]);
+      if (msg.to && msg.to.length > 0) {
+        ensureGroupTab(msg.to);
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -185,15 +185,14 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         from: displayName,
         text,
         timestamp: envelope.timestamp,
-        isDM: true,
-        peer: from,
+        to: [from],
       };
       const tabId = ensureGroupTab([from]);
       if (activeTab === 'inbox') {
         setActiveTab(tabId);
       }
       setChatMessages((prev) => trimMessages([...prev, msg]));
-      try { appendToConversation(msg, conversationPath); } catch {}
+      try { appendToConversation(msg, conversationPath, configPeers); } catch {}
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
@@ -309,11 +308,10 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
       timestamp: Date.now(),
-      isDM: true,
-      peer: cleanedRecipients[0],
+      to: cleanedRecipients,
     };
     setChatMessages((prev) => trimMessages([...prev, msg]));
-    try { appendToConversation(msg, conversationPath); } catch {}
+    try { appendToConversation(msg, conversationPath, configPeers); } catch {};
   };
 
   const handleSubmit = (value: string): void => {

@@ -207,8 +207,10 @@ function App() {
         setStatus(data.value);
       } else if (data.type === 'message') {
         setMessages(prev => [...prev, data]);
-        if (data.isDM && data.peer) {
-          setDmPeers(prev => prev.some(p => p.key === data.peer) ? prev : [...prev, { key: data.peer, name: data.peer.slice(-8) }]);
+        if (data.to && data.to.length > 0) {
+          for (const peerKey of data.to) {
+            setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerKey.slice(-8) }]);
+          }
         }
       } else if (data.type === 'system') {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
@@ -282,7 +284,7 @@ function App() {
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
   const visibleMessages = activeTab === 'inbox'
     ? messages
-    : messages.filter(m => m.from === 'system' || (m.peer && activeTabMeta && activeTabMeta.recipients.includes(m.peer)));
+    : messages.filter(m => m.from === 'system' || (m.to && activeTabMeta && m.to.some(key => activeTabMeta.recipients.includes(key))));
 
   const upsertGroupTab = (recipients) => {
     const unique = Array.from(new Set(recipients)).filter(Boolean).sort();
@@ -436,7 +438,7 @@ export function startWebServer(options: WebServerOptions): void {
     security,
   } = options;
 
-  const messages: Message[] = loadConversation(conversationPath);
+  const messages: Message[] = loadConversation(conversationPath, configPeers);
   const peers = new Map<string, string>();
   const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
   for (const peer of security?.ignoredPeers ?? []) {
@@ -504,14 +506,14 @@ export function startWebServer(options: WebServerOptions): void {
 
     const displayName = formatDisplayName(resolveDisplayName(from, fromName, configPeers), from);
     const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeers);
-    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, isDM: true, peer: from };
+    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: [from] };
     messages.push(msg);
     {
-      const lines = messages.map(formatMessageLine);
+      const lines = messages.map(m => formatMessageLine(m));
       const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
       if (trimmed.length < messages.length) messages.splice(0, messages.length - trimmed.length);
     }
-    try { appendToConversation(msg, conversationPath); } catch { /* ignore */ }
+    try { appendToConversation(msg, conversationPath, configPeers); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...msg });
   });
 
@@ -616,11 +618,10 @@ export function startWebServer(options: WebServerOptions): void {
           from: ownDisplayName,
           text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
           timestamp: Date.now(),
-          isDM: true,
-          peer: peerKey,
+          to: [peerKey],
         };
         messages.push(dmMsg);
-        try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
+        try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
       } else {
         broadcastToClients({ type: 'system', text: "Peer '" + peerName + "' not found", timestamp: Date.now() });
@@ -645,11 +646,10 @@ export function startWebServer(options: WebServerOptions): void {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
       timestamp: Date.now(),
-      isDM: true,
-      peer: peerKey,
+      to: [peerKey],
     };
     messages.push(dmMsg);
-    try { appendToConversation(dmMsg, conversationPath); } catch { /* ignore */ }
+    try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...dmMsg });
   };
 
@@ -674,11 +674,10 @@ export function startWebServer(options: WebServerOptions): void {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
       timestamp: Date.now(),
-      isDM: true,
-      peer: uniqueRecipients[0],
+      to: uniqueRecipients,
     };
     messages.push(groupMsg);
-    try { appendToConversation(groupMsg, conversationPath); } catch { /* ignore */ }
+    try { appendToConversation(groupMsg, conversationPath, configPeers); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...groupMsg });
   };
 

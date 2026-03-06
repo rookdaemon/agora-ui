@@ -16,9 +16,8 @@ export interface Message {
   from: string;
   text: string;
   timestamp: number;
-  isDM?: boolean;
-  /** For DM messages: the other party's public key */
-  peer?: string;
+  /** Conversation partner public keys (for tab routing) */
+  to?: string[];
 }
 
 export interface PeerInfo {
