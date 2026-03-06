@@ -1,7 +1,15 @@
-import { formatDisplayName, sanitizeText, resolveDisplayName, shorten, expand, expandInlineReferences, compactInlineReferences } from '@rookdaemon/agora';
-import type { AgoraPeerConfig } from '@rookdaemon/agora';
+import { formatDisplayName, sanitizeText, resolveDisplayName, shorten, expand, expandInlineReferences, compactInlineReferences, mergeDirectories } from '@rookdaemon/agora';
+import type { AgoraPeerConfig, SeenKeyStore, PeerReferenceEntry } from '@rookdaemon/agora';
 
 export { formatDisplayName, sanitizeText, resolveDisplayName };
+
+/**
+ * Build a merged directory from config peers + seen keys.
+ * Config peers take priority (they have names).
+ */
+function buildDirectory(configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): PeerReferenceEntry[] {
+  return mergeDirectories(configPeers, seenKeyStore ? seenKeyStore.toReferenceEntries() : []);
+}
 
 export function extractTextFromPayload(payload: unknown): string {
   if (payload && typeof payload === 'object' && 'text' in payload && typeof (payload as { text: unknown }).text === 'string') {
@@ -15,12 +23,12 @@ export function shortenPeerId(publicKey: string, configPeers: Record<string, Ago
   return shorten(publicKey, configPeers);
 }
 
-export function expandPeerRef(reference: string, configPeers: Record<string, AgoraPeerConfig>): string | undefined {
-  return expand(reference, configPeers);
+export function expandPeerRef(reference: string, configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): string | undefined {
+  return expand(reference, seenKeyStore ? buildDirectory(configPeers, seenKeyStore) : configPeers);
 }
 
-export function expandInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>): string {
-  return expandInlineReferences(text, configPeers);
+export function expandInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): string {
+  return expandInlineReferences(text, seenKeyStore ? buildDirectory(configPeers, seenKeyStore) : configPeers);
 }
 
 export function compactInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>): string {

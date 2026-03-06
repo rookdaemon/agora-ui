@@ -612,7 +612,7 @@ export function startWebServer(options: WebServerOptions): void {
     const dmMatch = text.match(/^@(\S+)\s+(.+)$/);
     if (dmMatch) {
       const [, peerName, dmText] = dmMatch;
-      const resolvedFromConfig = expandPeerRef(peerName, configPeers);
+      const resolvedFromConfig = expandPeerRef(peerName, configPeers, seenKeyStore);
       const peerEntry = resolvedFromConfig
         ? [resolvedFromConfig, peers.get(resolvedFromConfig) ?? shortenPeerId(resolvedFromConfig, configPeers)] as const
         : Array.from(peers.entries()).find(
@@ -620,7 +620,7 @@ export function startWebServer(options: WebServerOptions): void {
           );
       if (peerEntry) {
         const [peerKey] = peerEntry;
-        const expandedText = expandInlineRefs(dmText, configPeers);
+        const expandedText = expandInlineRefs(dmText, configPeers, seenKeyStore);
         void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
         const dmMsg: Message = {
           from: ownDisplayName,
@@ -648,7 +648,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const expandedText = expandInlineRefs(text, configPeers);
+    const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
     void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
     const dmMsg: Message = {
       from: ownDisplayName,
@@ -675,7 +675,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const expandedText = expandInlineRefs(text, configPeers);
+    const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
     void relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText });
 
     const groupMsg: Message = {
@@ -692,7 +692,7 @@ export function startWebServer(options: WebServerOptions): void {
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
     const resolved = Array.from(new Set(refs.map((ref) => {
-      const byConfig = expandPeerRef(ref, configPeers);
+      const byConfig = expandPeerRef(ref, configPeers, seenKeyStore);
       if (byConfig) return byConfig;
       for (const [peerKey, displayName] of peers.entries()) {
         if (peerKey.startsWith(ref) || displayName.startsWith(ref) || displayName.includes(ref)) {
