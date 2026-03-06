@@ -613,7 +613,7 @@ export function startWebServer(options: WebServerOptions): void {
       if (peerEntry) {
         const [peerKey] = peerEntry;
         const expandedText = expandInlineRefs(dmText, configPeers);
-        void relay.sendToRecipients([peerKey], 'publish', { text: expandedText, dm: true });
+        void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
         const dmMsg: Message = {
           from: ownDisplayName,
           text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
@@ -641,7 +641,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers);
-    void relay.sendToRecipients([peerKey], 'publish', { text: expandedText, dm: true });
+    void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
     const dmMsg: Message = {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
@@ -668,7 +668,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers);
-    void relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText, dm: true });
+    void relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText });
 
     const groupMsg: Message = {
       from: ownDisplayName,

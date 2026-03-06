@@ -301,7 +301,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     }
 
     const expandedText = expandInlineRefs(rawText, configPeers);
-    void relay.sendToRecipients(cleanedRecipients, 'publish', { text: expandedText, dm: true });
+    void relay.sendToRecipients(cleanedRecipients, 'publish', { text: expandedText });
 
     const ownDisplayName = formatDisplayName(broadcastName, publicKey);
     const msg: Message = {
