@@ -497,9 +497,16 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('message', (envelope: Envelope, from: string) => {
-    // Persist seen public key for identity resolution
-    if (from && seenKeyStore) {
-      seenKeyStore.record(from);
+    // Persist all encountered public keys for identity resolution.
+    if (seenKeyStore) {
+      if (from) {
+        seenKeyStore.record(from);
+      }
+      for (const recipient of envelope.to ?? []) {
+        if (recipient) {
+          seenKeyStore.record(recipient);
+        }
+      }
       seenKeyStore.flush();
     }
 
