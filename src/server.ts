@@ -149,7 +149,7 @@ function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick }) {
             <span className="ignored-list">
               {ignoredPeers.map((key) => {
                 const match = onlinePeers.find((peer) => peer.key === key);
-                const label = match?.name || ('...' + key.slice(-8));
+                const label = match?.name || ('@' + key.slice(-8));
                 return (
                   <span key={key} className="ignored-item">
                     <a className="peer-link ignored-name" onClick={() => onPeerClick({ key, name: label })}>{label}</a>
@@ -230,7 +230,7 @@ function App() {
         setGroupTabs(prev => prev.map(group => ({
           ...group,
           label: group.recipients
-            .map((peerKey) => data.peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8)))
+            .map((peerKey) => data.peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8)))
             .join(', '),
         })));
       } else if (data.type === 'info') {
@@ -261,7 +261,7 @@ function App() {
   });
   ignoredPeers.forEach((key) => {
     if (!allPeerMap.has(key)) {
-      allPeerMap.set(key, { key, name: '...' + key.slice(-8), ignored: true });
+      allPeerMap.set(key, { key, name: '@' + key.slice(-8), ignored: true });
     } else {
       const existing = allPeerMap.get(key);
       allPeerMap.set(key, { ...existing, ignored: true });
@@ -292,7 +292,7 @@ function App() {
     if (unique.length <= 1) {
       const peerKey = unique[0];
       if (!peerKey) return;
-      const peerName = peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8));
+      const peerName = peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8));
       setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerName }]);
       setActiveTab(peerKey);
       return;
@@ -302,7 +302,7 @@ function App() {
     setGroupTabs(prev => {
       const existing = prev.find((tab) => tab.id === id);
       if (existing) return prev;
-      const label = unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('...' + peerKey.slice(-8))).join(', ');
+      const label = unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8))).join(', ');
       return [...prev, { id, label, peerKey: null, recipients: unique, ignored: false }];
     });
     setActiveTab(id);
