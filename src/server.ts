@@ -4,7 +4,7 @@ import { exec } from 'child_process';
 import { RelayClient } from '@rookdaemon/agora';
 import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
-import { getIgnoredPeersPath, IgnoredPeersManager } from '@rookdaemon/agora';
+import { getIgnoredPeersPath, getSeenKeysPath, IgnoredPeersManager, SeenKeyStore } from '@rookdaemon/agora';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
@@ -22,6 +22,7 @@ export interface WebServerOptions {
   conversationPath?: string;
   sentPath?: string;
   ignoredPath?: string;
+  seenKeysPath?: string;
   port?: number;
   security?: SecurityOptions;
 }
@@ -434,13 +435,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 export function startWebServer(options: WebServerOptions): void {
   const {
     relayUrl, publicKey, privateKey, username, broadcastName,
-    configPeers, conversationPath, sentPath, ignoredPath, port = 3000,
+    configPeers, conversationPath, sentPath, ignoredPath, seenKeysPath, port = 3000,
     security,
   } = options;
 
   const messages: Message[] = loadConversation(conversationPath, configPeers);
   const peers = new Map<string, string>();
   const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
+  const seenKeyStore = seenKeysPath ? new SeenKeyStore(seenKeysPath) : null;
   for (const peer of security?.ignoredPeers ?? []) {
     ignoredPeersManager.ignorePeer(peer);
   }
@@ -479,7 +481,7 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'system', text: 'Connected to relay', timestamp: Date.now() });
     const online = relay.getOnlinePeers();
     for (const p of online) {
-      const displayName = formatDisplayName(resolveDisplayName(p.publicKey, p.name, configPeers), p.publicKey);
+      const displayName = formatDisplayName(resolveDisplayName(p.publicKey, configPeers), p.publicKey);
       peers.set(p.publicKey, displayName);
     }
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
@@ -494,7 +496,13 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'system', text: 'Disconnected from relay', timestamp: Date.now() });
   });
 
-  relay.on('message', (envelope: Envelope, from: string, fromName?: string) => {
+  relay.on('message', (envelope: Envelope, from: string) => {
+    // Persist seen public key for identity resolution
+    if (from && seenKeyStore) {
+      seenKeyStore.record(from);
+      seenKeyStore.flush();
+    }
+
     const guardResult = guard.shouldDrop(envelope, from);
     if (guardResult.drop) {
       if (guardResult.reason === 'ignored_peer') {
@@ -504,7 +512,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const displayName = formatDisplayName(resolveDisplayName(from, fromName, configPeers), from);
+    const displayName = formatDisplayName(resolveDisplayName(from, configPeers), from);
     const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeers);
     const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: [from] };
     messages.push(msg);
@@ -518,7 +526,7 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('peer_online', (peer: RelayPeer) => {
-    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
+    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, configPeers), peer.publicKey);
     peers.set(peer.publicKey, displayName);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {
@@ -528,7 +536,7 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('peer_offline', (peer: RelayPeer) => {
-    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, peer.name, configPeers), peer.publicKey);
+    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, configPeers), peer.publicKey);
     peers.delete(peer.publicKey);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {

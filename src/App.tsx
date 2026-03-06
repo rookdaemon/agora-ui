@@ -163,7 +163,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       setPeers((prev) => {
         const next = new Map(prev);
         for (const peer of online) {
-          const resolvedName = resolveDisplayName(peer.publicKey, peer.name, configPeers);
+          const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
           const displayName = formatDisplayName(resolvedName, peer.publicKey);
           next.set(peer.publicKey, displayName);
         }
@@ -176,8 +176,8 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       addSystemMessage('Disconnected from relay');
     });
 
-    client.on('message', (envelope: Envelope, from: string, fromName?: string) => {
-      const resolvedName = resolveDisplayName(from, fromName, configPeers);
+    client.on('message', (envelope: Envelope, from: string) => {
+      const resolvedName = resolveDisplayName(from, configPeers);
       const displayName = formatDisplayName(resolvedName, from);
       const expandedText = extractTextFromPayload(envelope.payload);
       const text = compactInlineRefs(expandedText, configPeers);
@@ -196,7 +196,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
-      const resolvedName = resolveDisplayName(peer.publicKey, peer.name, configPeers);
+      const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
       const displayName = formatDisplayName(resolvedName, peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);
@@ -207,7 +207,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     });
 
     client.on('peer_offline', (peer: RelayPeer) => {
-      const resolvedName = resolveDisplayName(peer.publicKey, peer.name, configPeers);
+      const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
       const displayName = formatDisplayName(resolvedName, peer.publicKey);
       setPeers((prev) => {
         const next = new Map(prev);

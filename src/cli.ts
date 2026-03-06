@@ -2,7 +2,7 @@
 import { startWebServer } from './server.js';
 import { loadConfig, getRelayUrl } from './config.js';
 import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
-import { getIgnoredPeersPath } from '@rookdaemon/agora';
+import { getIgnoredPeersPath, getSeenKeysPath } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
 import { getSentPath } from './sent.js';
@@ -111,6 +111,7 @@ function main() {
     const conversationPath = getConversationPath(storageDir);
     const sentPath = getSentPath(storageDir);
     const ignoredPath = getIgnoredPeersPath(storageDir);
+    const seenKeysPath = getSeenKeysPath(storageDir);
 
     const securityOptions: SecurityOptions = {
       rateLimitEnabled: cliArgs.rateLimitEnabled ?? env.rateLimitEnabled,
@@ -133,6 +134,7 @@ function main() {
       conversationPath,
       sentPath,
       ignoredPath,
+      seenKeysPath,
       port: cliArgs.port,
       security: securityOptions,
     });
