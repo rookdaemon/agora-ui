@@ -136,7 +136,7 @@ function parseJSONWithDetails(content: string, configPath: string): unknown {
  */
 export function loadConfig(configPath?: string): AgoraConfig & { identity: { publicKey: string; privateKey: string } } {
   const path = configPath ?? getDefaultConfigPath();
-  
+
   // Check if file exists first
   if (!existsSync(path)) {
     throw new Error(
@@ -185,7 +185,7 @@ export function loadConfig(configPath?: string): AgoraConfig & { identity: { pub
   const config = parsedConfig as AgoraConfigLoaded;
   return {
     identity: config.identity,
-    peers: config.peers,
+    peers: config.peers || {},
     relay: config.relay ? { url: config.relay.url } : undefined,
   };
 }
