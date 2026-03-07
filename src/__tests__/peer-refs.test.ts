@@ -32,4 +32,19 @@ describe('peer reference helpers', () => {
     expect(expandInlineRefs('ping @not-a-peer', configPeers)).toBe('ping @not-a-peer');
     expect(compactInlineRefs('ping @not-a-peer', configPeers)).toBe('ping @not-a-peer');
   });
+
+  it('resolves peer names without seenKeyStore', () => {
+    // Regression test for expandPeerRef building proper directory format
+    // even when seenKeyStore is undefined
+    expect(expandPeerRef('alice', configPeers)).toBe(ALICE);
+    expect(expandPeerRef('bob', configPeers)).toBe(BOB);
+    expect(expandPeerRef('alice', configPeers, undefined)).toBe(ALICE);
+    expect(expandPeerRef('alice', configPeers, null)).toBe(ALICE);
+  });
+
+  it('works with empty configPeers object', () => {
+    // Regression test for handling undefined/empty peers
+    expect(expandPeerRef('alice', {})).toBeUndefined();
+    expect(expandPeerRef('alice', {}, null)).toBeUndefined();
+  });
 });

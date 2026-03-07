@@ -70,6 +70,35 @@ describe('Config Loading', () => {
     const loaded = loadConfig(TEST_CONFIG_PATH);
     expect(loaded.identity.publicKey).toBe('302a300506032b657003210012345678');
   });
+
+  it('should default to empty peers object when peers not in config', () => {
+    const config = {
+      identity: {
+        publicKey: '302a300506032b657003210012345678',
+        privateKey: 'private123'
+      }
+      // No peers section
+    };
+    writeFileSync(TEST_CONFIG_PATH, JSON.stringify(config));
+    const loaded = loadConfig(TEST_CONFIG_PATH);
+    expect(loaded.peers).toEqual({});
+  });
+
+  it('should preserve peers when explicitly defined in config', () => {
+    const config = {
+      identity: {
+        publicKey: '302a300506032b657003210012345678',
+        privateKey: 'private123'
+      },
+      peers: {
+        alice: { publicKey: 'aaaa', name: 'alice' },
+        bob: { publicKey: 'bbbb', name: 'bob' }
+      }
+    };
+    writeFileSync(TEST_CONFIG_PATH, JSON.stringify(config));
+    const loaded = loadConfig(TEST_CONFIG_PATH);
+    expect(loaded.peers).toEqual(config.peers);
+  });
 });
 
 describe('Relay URL Resolution', () => {
