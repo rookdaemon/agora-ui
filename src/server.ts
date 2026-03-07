@@ -214,7 +214,7 @@ function App() {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
       } else if (data.type === 'group_tab') {
         if (data.recipients && data.recipients.length > 0) {
-          upsertGroupTab(data.recipients);
+          upsertGroupTab(data.recipients, data.label);
         } else {
           setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
         }
@@ -286,7 +286,7 @@ function App() {
     ? messages
     : messages.filter(m => m.from === 'system' || (m.to && activeTabMeta && m.to.some(key => activeTabMeta.recipients.includes(key))));
 
-  const upsertGroupTab = (recipients) => {
+  const upsertGroupTab = (recipients, serverLabel?) => {
     const unique = Array.from(new Set(recipients)).filter(Boolean).sort();
     if (unique.length <= 1) {
       const peerKey = unique[0];
@@ -301,7 +301,8 @@ function App() {
     setGroupTabs(prev => {
       const existing = prev.find((tab) => tab.id === id);
       if (existing) return prev;
-      const label = unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8))).join(', ');
+      // Use server-provided label if available, otherwise compute from peers
+      const label = serverLabel || unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8))).join(', ');
       return [...prev, { id, label, peerKey: null, recipients: unique, ignored: false }];
     });
     setActiveTab(id);
@@ -737,14 +738,18 @@ export function startWebServer(options: WebServerOptions): void {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
     const batch = resolveRecipientReferences(refs, configPeers, peers, seenKeyStore);
     const unresolved = batch.issues;
-    const resolved = Array.from(new Set(batch.recipients)); for (const issue of unresolved) {
+    const resolved = Array.from(new Set(batch.recipients));
+
+    for (const issue of unresolved) {
       ws.send(JSON.stringify({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() }));
     }
 
     if (resolved.length === 0) {
       ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group (see recipient issue details above)' }));
     } else {
-      ws.send(JSON.stringify({ type: 'group_tab', recipients: resolved }));
+      // Compute display label on server side where we have configPeers and can use shortenPeerId
+      const label = resolved.map(key => shortenPeerId(key, configPeers)).join(', ');
+      ws.send(JSON.stringify({ type: 'group_tab', recipients: resolved, label }));
     }
   };
 
