@@ -492,6 +492,13 @@ export function startWebServer(options: WebServerOptions): void {
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const ownDisplayName = formatDisplayName(broadcastName, publicKey);
 
+  console.error('[DEBUG] startWebServer:');
+  console.error('[DEBUG]   publicKey:', publicKey.slice(-16));
+  console.error('[DEBUG]   broadcastName:', broadcastName);
+  console.error('[DEBUG]   username:', username);
+  console.error('[DEBUG]   ownDisplayName:', ownDisplayName);
+  console.error('[DEBUG]   configPeersWithSelf has local user:', publicKey in configPeersWithSelf);
+
   const httpServer = createServer((_req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
     res.end(HTML);
@@ -614,7 +621,7 @@ export function startWebServer(options: WebServerOptions): void {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
     ws.send(JSON.stringify({ type: 'config_peers', peers: configPeersWithSelf }));
-    
+
     // Include local user in peers list for simplicity
     const peersWithSelf = new Map(peers);
     peersWithSelf.set(publicKey, ownDisplayName);
@@ -624,7 +631,7 @@ export function startWebServer(options: WebServerOptions): void {
     // Extract unique DM and group tabs from message history
     const dmRecipients = new Map<string, string>();
     const groupRecipients = new Map<string, string[]>();
-    
+
     for (const msg of messages) {
       if (msg.to && msg.to.length === 1) {
         const recipient = msg.to[0];
@@ -633,16 +640,27 @@ export function startWebServer(options: WebServerOptions): void {
           dmRecipients.set(recipient, displayName);
         }
       } else if (msg.to && msg.to.length > 1) {
-        const sorted = Array.from(new Set(msg.to)).sort();
-        const key = sorted.join('|');
-        if (!groupRecipients.has(key)) {
-          groupRecipients.set(key, sorted);
+        // Normalize: exclude self, deduplicate, and sort for canonical group ID
+        const normalized = Array.from(new Set(msg.to.filter(id => id !== publicKey))).sort();
+        // Only create group tab if 2+ recipients remain (otherwise it's a DM)
+        if (normalized.length > 1) {
+          const key = normalized.join('|');
+          if (!groupRecipients.has(key)) {
+            groupRecipients.set(key, normalized);
+          }
         }
       }
     }
-    
+
+    console.error('[DEBUG] Initial tabs extraction:');
+    console.error('[DEBUG]   DM tabs:', dmRecipients.size);
+    console.error('[DEBUG]   Group tabs:', groupRecipients.size);
+    if (groupRecipients.size > 0) {
+      console.error('[DEBUG]   Group tab keys:', Array.from(groupRecipients.keys()).map(k => k.split('|').map(id => id.slice(-8)).join(',')));
+    }
+
     ws.send(JSON.stringify({ type: 'initial_dm_tabs', tabs: Array.from(dmRecipients.entries()).map(([key, name]) => ({ key, name })) }));
-    
+
     // Send initial group tabs with server-computed labels
     const groupTabs = Array.from(groupRecipients.entries()).map(([id, recipients]) => ({
       id,
@@ -790,7 +808,8 @@ export function startWebServer(options: WebServerOptions): void {
     const resolutionIssues = resolvedBatch.issues;
     const resolvedRecipients = resolvedBatch.recipients;
 
-    const uniqueRecipients = Array.from(new Set(resolvedRecipients.filter((id) => id !== publicKey)));
+    // Normalize: exclude self, deduplicate, and sort for consistent grouping
+    const uniqueRecipients = Array.from(new Set(resolvedRecipients.filter((id) => id !== publicKey))).sort();
 
     for (const issue of resolutionIssues) {
       broadcastToClients({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() });
@@ -827,7 +846,8 @@ export function startWebServer(options: WebServerOptions): void {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
     const batch = resolveRecipientReferences(refs, configPeersWithSelf, peers, seenKeyStore);
     const unresolved = batch.issues;
-    const resolved = Array.from(new Set(batch.recipients));
+    // Normalize: exclude self, deduplicate, and sort
+    const resolved = Array.from(new Set(batch.recipients.filter(id => id !== publicKey))).sort();
 
     for (const issue of unresolved) {
       ws.send(JSON.stringify({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() }));
