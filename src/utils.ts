@@ -4,9 +4,29 @@ import type { AgoraPeerConfig, SeenKeyStore, PeerReferenceEntry } from '@rookdae
 export { formatDisplayName, sanitizeText, resolveDisplayName };
 
 /**
+ * Look up a peer by name or public key in configPeers.
+ * Returns the public key if found, undefined otherwise.
+ */
+function lookupPeerByNameOrKey(reference: string, configPeers: Record<string, AgoraPeerConfig>): string | undefined {
+  // Direct lookup by key
+  const byKey = configPeers[reference];
+  if (byKey?.publicKey) {
+    return byKey.publicKey;
+  }
+
+  // Search by name
+  for (const peer of Object.values(configPeers)) {
+    if (peer && typeof peer === 'object' && 'name' in peer && peer.name === reference) {
+      return peer.publicKey;
+    }
+  }
+
+  return undefined;
+}
+
+/**
  * Build a merged directory from config peers + seen keys.
  * Config peers take priority (they have names).
- * Note: configPeers may be keyed by either peer name or public key.
  */
 function buildDirectory(configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): PeerReferenceEntry[] {
   // Convert configPeers to PeerReferenceEntry[] format
@@ -31,6 +51,13 @@ export function shortenPeerId(publicKey: string, configPeers: Record<string, Ago
 }
 
 export function expandPeerRef(reference: string, configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): string | undefined {
+  // First try explicit lookup by name or key
+  const explicit = lookupPeerByNameOrKey(reference, configPeers);
+  if (explicit) {
+    return explicit;
+  }
+
+  // Fall back to expand() for short forms (name@suffix, @suffix, etc.)
   return expand(reference, buildDirectory(configPeers, seenKeyStore));
 }
 

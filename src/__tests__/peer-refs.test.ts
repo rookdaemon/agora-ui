@@ -47,4 +47,71 @@ describe('peer reference helpers', () => {
     expect(expandPeerRef('alice', {})).toBeUndefined();
     expect(expandPeerRef('alice', {}, null)).toBeUndefined();
   });
+
+  it('resolves peers when configPeers is keyed by publicKey', () => {
+    // Real-world scenario: agora config files key peers by public key, not name
+    const configPeersByKey = {
+      [ALICE]: { publicKey: ALICE, name: 'alice' },
+      [BOB]: { publicKey: BOB, name: 'bob' },
+    };
+    
+    // Should resolve by name
+    expect(expandPeerRef('alice', configPeersByKey)).toBe(ALICE);
+    expect(expandPeerRef('bob', configPeersByKey)).toBe(BOB);
+    
+    // Should also resolve by key
+    expect(expandPeerRef(ALICE, configPeersByKey)).toBe(ALICE);
+    expect(expandPeerRef(BOB, configPeersByKey)).toBe(BOB);
+  });
+
+  it('resolves peers regardless of configPeers key structure', () => {
+    // Should work whether peers are keyed by name or by public key
+    const byName = {
+      alice: { publicKey: ALICE, name: 'alice' },
+      bob: { publicKey: BOB, name: 'bob' },
+    };
+    
+    const byKey = {
+      [ALICE]: { publicKey: ALICE, name: 'alice' },
+      [BOB]: { publicKey: BOB, name: 'bob' },
+    };
+    
+    // Both should resolve by name
+    expect(expandPeerRef('alice', byName)).toBe(ALICE);
+    expect(expandPeerRef('alice', byKey)).toBe(ALICE);
+    
+    // Both should resolve by key
+    expect(expandPeerRef(ALICE, byName)).toBe(ALICE);
+    expect(expandPeerRef(ALICE, byKey)).toBe(ALICE);
+  });
+
+  it('does not depend on configPeers key ordering or structure', () => {
+    // Multiple ways to organize the same peers should all work
+    const shuffled = {
+      [BOB]: { publicKey: BOB, name: 'bob' },
+      [ALICE]: { publicKey: ALICE, name: 'alice' },
+    };
+    
+    expect(expandPeerRef('alice', shuffled)).toBe(ALICE);
+    expect(expandPeerRef('bob', shuffled)).toBe(BOB);
+    expect(expandPeerRef(ALICE, shuffled)).toBe(ALICE);
+    expect(expandPeerRef(BOB, shuffled)).toBe(BOB);
+  });
+
+  it('handles malformed peer entries gracefully', () => {
+    const mixed = {
+      alice: { publicKey: ALICE, name: 'alice' },
+      bad1: null,
+      bad2: undefined,
+      bad3: { name: 'broken' }, // missing publicKey
+      bob: { publicKey: BOB, name: 'bob' },
+    };
+    
+    // Should still resolve valid peers
+    expect(expandPeerRef('alice', mixed as any)).toBe(ALICE);
+    expect(expandPeerRef('bob', mixed as any)).toBe(BOB);
+    
+    // Should not crash on malformed entries
+    expect(expandPeerRef('broken', mixed as any)).toBeUndefined();
+  });
 });
