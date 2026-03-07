@@ -187,6 +187,7 @@ function App() {
   const [status, setStatus] = useState('connecting');
   const [messages, setMessages] = useState([]);
   const [peers, setPeers] = useState([]);
+  const [configPeers, setConfigPeers] = useState({});
   const [username, setUsername] = useState('');
   const [input, setInput] = useState('');
   const [sentHistory, setSentHistory] = useState([]);
@@ -217,6 +218,8 @@ function App() {
         } else {
           setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
         }
+      } else if (data.type === 'config_peers') {
+        setConfigPeers(data.peers || {});
       } else if (data.type === 'peers') {
         setPeers(data.peers);
         setDmPeers(prev => prev.map(dp => {
@@ -555,6 +558,7 @@ export function startWebServer(options: WebServerOptions): void {
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
+    ws.send(JSON.stringify({ type: 'config_peers', peers: configPeers }));
     ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
     ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
     for (const msg of messages) {
@@ -731,6 +735,13 @@ export function startWebServer(options: WebServerOptions): void {
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
+    
+    // Debug logging
+    console.error('[handleGroupResolve] input:', text);
+    console.error('[handleGroupResolve] refs:', refs);
+    console.error('[handleGroupResolve] configPeers keys:', Object.keys(configPeers));
+    console.error('[handleGroupResolve] configPeers:', JSON.stringify(configPeers, null, 2));
+    
     const batch = resolveRecipientReferences(refs, configPeers, peers, seenKeyStore);
     const unresolved = batch.issues;
     const resolved = Array.from(new Set(batch.recipients));
