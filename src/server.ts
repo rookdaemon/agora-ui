@@ -7,7 +7,7 @@ import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, getSeenKeysPath, IgnoredPeersManager, SeenKeyStore } from '@rookdaemon/agora';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { resolveRecipientReference, resolveRecipientReferences } from './recipient-resolution.js';
-import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
+import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
@@ -166,18 +166,35 @@ function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick }) {
   );
 }
 
-function MessageItem({ msg, myDisplayName }) {
+function MessageItem({ msg, myDisplayName, configPeers }) {
   const isSystem = msg.from === 'system';
   const isMe = !isSystem && msg.from === myDisplayName;
   const senderClass = isMe ? 'msg-sender-me' : 'msg-sender-other';
   const senderLabel = isMe ? 'You' : msg.from;
+  
+  // Format TO: recipients if present
+  let toLabel = '';
+  if (!isSystem && msg.to && msg.to.length > 0) {
+    // Use browser's configPeers to get short names - fallback to suffix
+    const toNames = msg.to.map(key => {
+      // Try to find peer by publicKey in configPeers
+      const peer = Object.values(configPeers || {}).find(p => p?.publicKey === key);
+      if (peer?.name) {
+        return peer.name + '@' + key.slice(-8);
+      }
+      return '@' + key.slice(-8);
+    });
+    toLabel = ' To: ' + toNames.join(', ');
+  }
+  
   return (
     <div className={'msg' + (isSystem ? ' msg-system' : '')}>
       <span className="msg-time">[{formatTime(msg.timestamp)}]</span>
       <span className="msg-body">
         {!isSystem && <span className={'msg-sender ' + senderClass}>{senderLabel}: </span>}
         <span className="msg-text">{msg.text}</span>
-        {!isSystem && <span className="dm-badge">(P2P)</span>}
+        {toLabel && <span className="dm-badge">{toLabel}</span>}
+        {!isSystem && !toLabel && <span className="dm-badge">(P2P)</span>}
       </span>
     </div>
   );
@@ -220,18 +237,18 @@ function App() {
         }
       } else if (data.type === 'config_peers') {
         setConfigPeers(data.peers || {});
+      } else if (data.type === 'initial_dm_tabs') {
+        // Auto-create DM tabs from conversation history
+        if (data.tabs && Array.isArray(data.tabs)) {
+          setDmPeers(data.tabs);
+        }
       } else if (data.type === 'peers') {
         setPeers(data.peers);
+        // Update DM tab names when peers come online (in case tab was created before configPeers loaded)
         setDmPeers(prev => prev.map(dp => {
           const match = data.peers.find(p => p.key === dp.key);
           return match ? { ...dp, name: match.name } : dp;
         }));
-        setGroupTabs(prev => prev.map(group => ({
-          ...group,
-          label: group.recipients
-            .map((peerKey) => data.peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8)))
-            .join(', '),
-        })));
       } else if (data.type === 'info') {
         setUsername(data.username);
       } else if (data.type === 'ignored_peers') {
@@ -291,7 +308,9 @@ function App() {
     if (unique.length <= 1) {
       const peerKey = unique[0];
       if (!peerKey) return;
-      const peerName = peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8));
+      // Lookup name in configPeers (not online peers)
+      const peer = Object.values(configPeers || {}).find(p => p?.publicKey === peerKey);
+      const peerName = peer?.name ? (peer.name + '@' + peerKey.slice(-8)) : ('@' + peerKey.slice(-8));
       setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerName }]);
       setActiveTab(peerKey);
       return;
@@ -301,8 +320,11 @@ function App() {
     setGroupTabs(prev => {
       const existing = prev.find((tab) => tab.id === id);
       if (existing) return prev;
-      // Use server-provided label if available, otherwise compute from peers
-      const label = serverLabel || unique.map((peerKey) => peers.find((peer) => peer.key === peerKey)?.name || ('@' + peerKey.slice(-8))).join(', ');
+      // Use server-provided label if available, otherwise compute from configPeers
+      const label = serverLabel || unique.map((peerKey) => {
+        const peer = Object.values(configPeers || {}).find(p => p?.publicKey === peerKey);
+        return peer?.name ? (peer.name + '@' + peerKey.slice(-8)) : ('@' + peerKey.slice(-8));
+      }).join(', ');
       return [...prev, { id, label, peerKey: null, recipients: unique, ignored: false }];
     });
     setActiveTab(id);
@@ -405,7 +427,7 @@ function App() {
       <div className="messages">
         {visibleMessages.length === 0
           ? <div className="messages-empty">No messages yet. Type a message and press Enter to send.</div>
-          : visibleMessages.map((msg, i) => <MessageItem key={i} msg={msg} myDisplayName={username} />)
+          : visibleMessages.map((msg, i) => <MessageItem key={i} msg={msg} myDisplayName={username} configPeers={configPeers} />)
         }
         <div ref={bottomRef} />
       </div>
@@ -481,7 +503,8 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'system', text: 'Connected to relay', timestamp: Date.now() });
     const online = relay.getOnlinePeers();
     for (const p of online) {
-      const displayName = formatDisplayName(resolveDisplayName(p.publicKey, configPeers), p.publicKey);
+      const resolvedName = resolveDisplayName(p.publicKey, configPeers);
+      const displayName = formatDisplayName(resolvedName, p.publicKey);
       peers.set(p.publicKey, displayName);
     }
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
@@ -533,7 +556,8 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('peer_online', (peer: RelayPeer) => {
-    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, configPeers), peer.publicKey);
+    const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
+    const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.set(peer.publicKey, displayName);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {
@@ -543,7 +567,8 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('peer_offline', (peer: RelayPeer) => {
-    const displayName = formatDisplayName(resolveDisplayName(peer.publicKey, configPeers), peer.publicKey);
+    const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
+    const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.delete(peer.publicKey);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {
@@ -562,6 +587,20 @@ export function startWebServer(options: WebServerOptions): void {
     ws.send(JSON.stringify({ type: 'config_peers', peers: configPeers }));
     ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
     ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
+
+    // Extract unique DM recipients from message history and send as initial tabs
+    const dmRecipients = new Map<string, string>();
+    for (const msg of messages) {
+      if (msg.to && msg.to.length === 1) {
+        const recipient = msg.to[0];
+        if (!dmRecipients.has(recipient)) {
+          const displayName = shortenPeerId(recipient, configPeers);
+          dmRecipients.set(recipient, displayName);
+        }
+      }
+    }
+    ws.send(JSON.stringify({ type: 'initial_dm_tabs', tabs: Array.from(dmRecipients.entries()).map(([key, name]) => ({ key, name })) }));
+
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
     }

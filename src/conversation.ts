@@ -99,3 +99,23 @@ export function loadConversation(filePath?: string, directory?: PeerReferenceDir
 
   return trimmed.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
 }
+
+/**
+ * Loads older messages before a given timestamp.
+ * Returns up to maxMessages older messages, useful for pagination.
+ */
+export function loadOlderMessages(beforeTimestamp: number, maxMessages: number, filePath?: string, directory?: PeerReferenceDirectory): Message[] {
+  const path = filePath ?? getConversationPath();
+
+  if (!existsSync(path)) return [];
+
+  const content = readFileSync(path, 'utf-8');
+  const lines = content.split('\n').filter(l => l.length > 0);
+
+  // Parse all messages and filter to those before the timestamp
+  const allMessages = lines.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
+  const olderMessages = allMessages.filter(msg => msg.timestamp < beforeTimestamp);
+
+  // Return the most recent maxMessages from the filtered set
+  return olderMessages.slice(-maxMessages);
+}

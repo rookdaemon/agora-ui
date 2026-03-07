@@ -54,11 +54,11 @@ describe('peer reference helpers', () => {
       [ALICE]: { publicKey: ALICE, name: 'alice' },
       [BOB]: { publicKey: BOB, name: 'bob' },
     };
-    
+
     // Should resolve by name
     expect(expandPeerRef('alice', configPeersByKey)).toBe(ALICE);
     expect(expandPeerRef('bob', configPeersByKey)).toBe(BOB);
-    
+
     // Should also resolve by key
     expect(expandPeerRef(ALICE, configPeersByKey)).toBe(ALICE);
     expect(expandPeerRef(BOB, configPeersByKey)).toBe(BOB);
@@ -70,16 +70,16 @@ describe('peer reference helpers', () => {
       alice: { publicKey: ALICE, name: 'alice' },
       bob: { publicKey: BOB, name: 'bob' },
     };
-    
+
     const byKey = {
       [ALICE]: { publicKey: ALICE, name: 'alice' },
       [BOB]: { publicKey: BOB, name: 'bob' },
     };
-    
+
     // Both should resolve by name
     expect(expandPeerRef('alice', byName)).toBe(ALICE);
     expect(expandPeerRef('alice', byKey)).toBe(ALICE);
-    
+
     // Both should resolve by key
     expect(expandPeerRef(ALICE, byName)).toBe(ALICE);
     expect(expandPeerRef(ALICE, byKey)).toBe(ALICE);
@@ -91,7 +91,7 @@ describe('peer reference helpers', () => {
       [BOB]: { publicKey: BOB, name: 'bob' },
       [ALICE]: { publicKey: ALICE, name: 'alice' },
     };
-    
+
     expect(expandPeerRef('alice', shuffled)).toBe(ALICE);
     expect(expandPeerRef('bob', shuffled)).toBe(BOB);
     expect(expandPeerRef(ALICE, shuffled)).toBe(ALICE);
@@ -106,11 +106,11 @@ describe('peer reference helpers', () => {
       bad3: { name: 'broken' }, // missing publicKey
       bob: { publicKey: BOB, name: 'bob' },
     };
-    
+
     // Should still resolve valid peers
     expect(expandPeerRef('alice', mixed as any)).toBe(ALICE);
     expect(expandPeerRef('bob', mixed as any)).toBe(BOB);
-    
+
     // Should not crash on malformed entries
     expect(expandPeerRef('broken', mixed as any)).toBeUndefined();
   });
