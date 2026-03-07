@@ -24,7 +24,7 @@ export function shortenPeerId(publicKey: string, configPeers: Record<string, Ago
 }
 
 export function expandPeerRef(reference: string, configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): string | undefined {
-  return expand(reference, seenKeyStore ? buildDirectory(configPeers, seenKeyStore) : configPeers);
+  return expand(reference, buildDirectory(configPeers, seenKeyStore));
 }
 
 export function expandInlineRefs(text: string, configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): string {

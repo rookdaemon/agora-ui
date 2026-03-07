@@ -30,6 +30,23 @@ describe('recipient resolution', () => {
     expect(result.reason).toContain("unresolved recipient 'unknown-peer'");
   });
 
+  it('returns explicit reason when config maps name to non-key value', () => {
+    const peers = new Map<string, string>();
+    const badConfig = {
+      nova: { publicKey: 'nova', name: 'nova' },
+    };
+    const result = resolveRecipientReference('nova', badConfig, peers);
+    expect(result.recipient).toBeUndefined();
+    expect(result.reason).toContain("maps to non-key value 'nova' in config");
+  });
+
+  it('returns explicit reason when online peer id is not a public key', () => {
+    const peers = new Map<string, string>([['nova', 'nova']]);
+    const result = resolveRecipientReference('nova', {}, peers);
+    expect(result.recipient).toBeUndefined();
+    expect(result.reason).toContain("resolved to non-key online id 'nova'");
+  });
+
   it('returns ambiguous reason when multiple online matches exist', () => {
     const peers = new Map<string, string>([
       [NOVA, 'nova@99990000'],

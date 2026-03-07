@@ -12,7 +12,7 @@ export interface RecipientBatchResolution {
 }
 
 export function isLikelyPublicKey(value: string): boolean {
-  return /^[0-9a-fA-F]{16,}$/.test(value.trim());
+  return /^[0-9a-fA-F]{64,}$/.test(value.trim());
 }
 
 export function resolveRecipientReference(
@@ -32,6 +32,9 @@ export function resolveRecipientReference(
 
   const byConfig = expandPeerRef(token, configPeers, seenKeyStore);
   if (byConfig) {
+    if (!isLikelyPublicKey(byConfig)) {
+      return { reason: `recipient '${token}' maps to non-key value '${byConfig}' in config` };
+    }
     return { recipient: byConfig };
   }
 
@@ -44,7 +47,11 @@ export function resolveRecipientReference(
   ));
 
   if (matches.length === 1) {
-    return { recipient: matches[0][0] };
+    const peerKey = matches[0][0];
+    if (!isLikelyPublicKey(peerKey)) {
+      return { reason: `recipient '${token}' resolved to non-key online id '${peerKey}'` };
+    }
+    return { recipient: peerKey };
   }
 
   if (matches.length > 1) {
