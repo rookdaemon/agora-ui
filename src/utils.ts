@@ -6,9 +6,16 @@ export { formatDisplayName, sanitizeText, resolveDisplayName };
 /**
  * Build a merged directory from config peers + seen keys.
  * Config peers take priority (they have names).
+ * Note: configPeers may be keyed by either peer name or public key.
  */
 function buildDirectory(configPeers: Record<string, AgoraPeerConfig>, seenKeyStore?: SeenKeyStore | null): PeerReferenceEntry[] {
-  return mergeDirectories(configPeers, seenKeyStore ? seenKeyStore.toReferenceEntries() : []);
+  // Convert configPeers to PeerReferenceEntry[] format
+  // configPeers values already have publicKey and name fields
+  const entries = Object.values(configPeers).filter(
+    (peer): peer is AgoraPeerConfig & { publicKey: string } =>
+      peer && typeof peer === 'object' && 'publicKey' in peer && typeof (peer as any).publicKey === 'string'
+  );
+  return mergeDirectories(entries, seenKeyStore ? seenKeyStore.toReferenceEntries() : []);
 }
 
 export function extractTextFromPayload(payload: unknown): string {
