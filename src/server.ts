@@ -461,7 +461,16 @@ export function startWebServer(options: WebServerOptions): void {
     security,
   } = options;
 
-  const messages: Message[] = loadConversation(conversationPath, configPeers);
+  // Add local user to configPeers so they can be looked up by publicKey
+  const configPeersWithSelf: Record<string, AgoraPeerConfig> = {
+    ...configPeers,
+    [publicKey]: {
+      publicKey,
+      name: broadcastName,
+    },
+  };
+
+  const messages: Message[] = loadConversation(conversationPath, configPeersWithSelf);
   const peers = new Map<string, string>();
   const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
   const seenKeyStore = seenKeysPath ? new SeenKeyStore(seenKeysPath) : null;
@@ -503,7 +512,7 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'system', text: 'Connected to relay', timestamp: Date.now() });
     const online = relay.getOnlinePeers();
     for (const p of online) {
-      const resolvedName = resolveDisplayName(p.publicKey, configPeers);
+      const resolvedName = resolveDisplayName(p.publicKey, configPeersWithSelf);
       const displayName = formatDisplayName(resolvedName, p.publicKey);
       peers.set(p.publicKey, displayName);
     }
@@ -542,8 +551,8 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const displayName = formatDisplayName(resolveDisplayName(from, configPeers), from);
-    const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeers);
+    const displayName = formatDisplayName(resolveDisplayName(from, configPeersWithSelf), from);
+    const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeersWithSelf);
     const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: envelope.to };
     messages.push(msg);
     {
@@ -551,12 +560,12 @@ export function startWebServer(options: WebServerOptions): void {
       const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
       if (trimmed.length < messages.length) messages.splice(0, messages.length - trimmed.length);
     }
-    try { appendToConversation(msg, conversationPath, configPeers); } catch { /* ignore */ }
+    try { appendToConversation(msg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...msg });
   });
 
   relay.on('peer_online', (peer: RelayPeer) => {
-    const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
+    const resolvedName = resolveDisplayName(peer.publicKey, configPeersWithSelf);
     const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.set(peer.publicKey, displayName);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
@@ -567,7 +576,7 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   relay.on('peer_offline', (peer: RelayPeer) => {
-    const resolvedName = resolveDisplayName(peer.publicKey, configPeers);
+    const resolvedName = resolveDisplayName(peer.publicKey, configPeersWithSelf);
     const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.delete(peer.publicKey);
     broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
@@ -584,7 +593,7 @@ export function startWebServer(options: WebServerOptions): void {
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
-    ws.send(JSON.stringify({ type: 'config_peers', peers: configPeers }));
+    ws.send(JSON.stringify({ type: 'config_peers', peers: configPeersWithSelf }));
     ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
     ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
 
@@ -594,7 +603,7 @@ export function startWebServer(options: WebServerOptions): void {
       if (msg.to && msg.to.length === 1) {
         const recipient = msg.to[0];
         if (!dmRecipients.has(recipient)) {
-          const displayName = shortenPeerId(recipient, configPeers);
+          const displayName = shortenPeerId(recipient, configPeersWithSelf);
           dmRecipients.set(recipient, displayName);
         }
       }
@@ -649,7 +658,7 @@ export function startWebServer(options: WebServerOptions): void {
   });
 
   const resolveRecipientRef = (reference: string): { recipient?: string; reason?: string } => (
-    resolveRecipientReference(reference, configPeers, peers, seenKeyStore)
+    resolveRecipientReference(reference, configPeersWithSelf, peers, seenKeyStore)
   );
 
   const handleSend = async (text: string): Promise<void> => {
@@ -666,7 +675,7 @@ export function startWebServer(options: WebServerOptions): void {
       const resolved = resolveRecipientRef(peerName);
       if (resolved.recipient) {
         const peerKey = resolved.recipient;
-        const expandedText = expandInlineRefs(dmText.trim(), configPeers, seenKeyStore);
+        const expandedText = expandInlineRefs(dmText.trim(), configPeersWithSelf, seenKeyStore);
         const result = await relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
 
         if (!result.ok && result.errors.length > 0) {
@@ -676,12 +685,12 @@ export function startWebServer(options: WebServerOptions): void {
 
         const dmMsg: Message = {
           from: ownDisplayName,
-          text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
+          text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeersWithSelf),
           timestamp: Date.now(),
           to: [peerKey],
         };
         messages.push(dmMsg);
-        try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
+        try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
       } else {
         broadcastToClients({ type: 'system', text: `Cannot send DM: ${resolved.reason}. Use /peers to list resolvable keys.`, timestamp: Date.now() });
@@ -708,7 +717,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const targetPeerKey = resolved.recipient;
 
-    const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
+    const expandedText = expandInlineRefs(text, configPeersWithSelf, seenKeyStore);
     const result = await relay.sendToRecipients([targetPeerKey], 'publish', { text: expandedText });
 
     if (!result.ok && result.errors.length > 0) {
@@ -719,12 +728,12 @@ export function startWebServer(options: WebServerOptions): void {
 
     const dmMsg: Message = {
       from: ownDisplayName,
-      text: compactInlineRefs(expandedText, configPeers),
+      text: compactInlineRefs(expandedText, configPeersWithSelf),
       timestamp: Date.now(),
       to: [targetPeerKey],
     };
     messages.push(dmMsg);
-    try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
+    try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...dmMsg });
   };
 
@@ -736,7 +745,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const resolvedBatch = resolveRecipientReferences(recipients, configPeers, peers, seenKeyStore);
+    const resolvedBatch = resolveRecipientReferences(recipients, configPeersWithSelf, peers, seenKeyStore);
     const resolutionIssues = resolvedBatch.issues;
     const resolvedRecipients = resolvedBatch.recipients;
 
@@ -751,7 +760,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
+    const expandedText = expandInlineRefs(text, configPeersWithSelf, seenKeyStore);
     const result = await relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText });
 
     // Report any send errors
@@ -764,18 +773,18 @@ export function startWebServer(options: WebServerOptions): void {
 
     const groupMsg: Message = {
       from: ownDisplayName,
-      text: compactInlineRefs(expandedText, configPeers),
+      text: compactInlineRefs(expandedText, configPeersWithSelf),
       timestamp: Date.now(),
       to: uniqueRecipients,
     };
     messages.push(groupMsg);
-    try { appendToConversation(groupMsg, conversationPath, configPeers); } catch { /* ignore */ }
+    try { appendToConversation(groupMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...groupMsg });
   };
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
-    const batch = resolveRecipientReferences(refs, configPeers, peers, seenKeyStore);
+    const batch = resolveRecipientReferences(refs, configPeersWithSelf, peers, seenKeyStore);
     const unresolved = batch.issues;
     const resolved = Array.from(new Set(batch.recipients));
 
@@ -786,8 +795,8 @@ export function startWebServer(options: WebServerOptions): void {
     if (resolved.length === 0) {
       ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group (see recipient issue details above)' }));
     } else {
-      // Compute display label on server side where we have configPeers and can use shortenPeerId
-      const label = resolved.map(key => shortenPeerId(key, configPeers)).join(', ');
+      // Compute display label on server side where we have configPeersWithSelf and can use shortenPeerId
+      const label = resolved.map(key => shortenPeerId(key, configPeersWithSelf)).join(', ');
       ws.send(JSON.stringify({ type: 'group_tab', recipients: resolved, label }));
     }
   };
