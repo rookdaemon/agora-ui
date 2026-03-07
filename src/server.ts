@@ -735,13 +735,19 @@ export function startWebServer(options: WebServerOptions): void {
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
-    
+
     // Debug logging
     console.error('[handleGroupResolve] input:', text);
     console.error('[handleGroupResolve] refs:', refs);
     console.error('[handleGroupResolve] configPeers keys:', Object.keys(configPeers));
     console.error('[handleGroupResolve] configPeers:', JSON.stringify(configPeers, null, 2));
     
+    // Log what expandPeerRef returns for each ref
+    for (const ref of refs) {
+      const expanded = expandPeerRef(ref, configPeers, seenKeyStore);
+      console.error(`[handleGroupResolve] expandPeerRef('${ref}') returned:`, expanded);
+    }
+
     const batch = resolveRecipientReferences(refs, configPeers, peers, seenKeyStore);
     const unresolved = batch.issues;
     const resolved = Array.from(new Set(batch.recipients));
