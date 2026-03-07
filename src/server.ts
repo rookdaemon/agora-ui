@@ -6,6 +6,7 @@ import type { Envelope, RelayPeer } from '@rookdaemon/agora';
 import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, getSeenKeysPath, IgnoredPeersManager, SeenKeyStore } from '@rookdaemon/agora';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
+import { resolveRecipientReference, resolveRecipientReferences } from './recipient-resolution.js';
 import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
@@ -603,6 +604,10 @@ export function startWebServer(options: WebServerOptions): void {
     });
   });
 
+  const resolveRecipientRef = (reference: string): { recipient?: string; reason?: string } => (
+    resolveRecipientReference(reference, configPeers, peers, seenKeyStore)
+  );
+
   const handleSend = async (text: string): Promise<void> => {
     try { appendToSent(text, sentPath); } catch { /* ignore */ }
 
@@ -614,14 +619,9 @@ export function startWebServer(options: WebServerOptions): void {
     const dmMatch = text.match(/^@(\S+)\s+(.+)$/);
     if (dmMatch) {
       const [, peerName, dmText] = dmMatch;
-      const resolvedFromConfig = expandPeerRef(peerName, configPeers, seenKeyStore);
-      const peerEntry = resolvedFromConfig
-        ? [resolvedFromConfig, peers.get(resolvedFromConfig) ?? shortenPeerId(resolvedFromConfig, configPeers)] as const
-        : Array.from(peers.entries()).find(
-          ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
-        );
-      if (peerEntry) {
-        const [peerKey] = peerEntry;
+      const resolved = resolveRecipientRef(peerName);
+      if (resolved.recipient) {
+        const peerKey = resolved.recipient;
         const expandedText = expandInlineRefs(dmText.trim(), configPeers, seenKeyStore);
         const result = await relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
 
@@ -640,7 +640,7 @@ export function startWebServer(options: WebServerOptions): void {
         try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
       } else {
-        broadcastToClients({ type: 'system', text: "Peer '" + peerName + "' not found", timestamp: Date.now() });
+        broadcastToClients({ type: 'system', text: `Cannot send DM: ${resolved.reason}. Use /peers to list resolvable keys.`, timestamp: Date.now() });
       }
       return;
     }
@@ -656,11 +656,19 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
+    const resolved = resolveRecipientRef(peerKey);
+    if (!resolved.recipient) {
+      broadcastToClients({ type: 'system', text: `Cannot send: ${resolved.reason}. Re-open the peer tab from /peers.`, timestamp: Date.now() });
+      return;
+    }
+
+    const targetPeerKey = resolved.recipient;
+
     const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
-    const result = await relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
+    const result = await relay.sendToRecipients([targetPeerKey], 'publish', { text: expandedText });
 
     if (!result.ok && result.errors.length > 0) {
-      const peerName = peers.get(peerKey) || ('@' + peerKey.slice(-8));
+      const peerName = peers.get(targetPeerKey) || ('@' + targetPeerKey.slice(-8));
       broadcastToClients({ type: 'system', text: `Failed to send to ${peerName}: ${result.errors[0].error}`, timestamp: Date.now() });
       return;
     }
@@ -669,7 +677,7 @@ export function startWebServer(options: WebServerOptions): void {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
       timestamp: Date.now(),
-      to: [peerKey],
+      to: [targetPeerKey],
     };
     messages.push(dmMsg);
     try { appendToConversation(dmMsg, conversationPath, configPeers); } catch { /* ignore */ }
@@ -684,9 +692,18 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    const uniqueRecipients = Array.from(new Set(recipients.filter(Boolean).filter((id) => id !== publicKey)));
+    const resolvedBatch = resolveRecipientReferences(recipients, configPeers, peers, seenKeyStore);
+    const resolutionIssues = resolvedBatch.issues;
+    const resolvedRecipients = resolvedBatch.recipients;
+
+    const uniqueRecipients = Array.from(new Set(resolvedRecipients.filter((id) => id !== publicKey)));
+
+    for (const issue of resolutionIssues) {
+      broadcastToClients({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() });
+    }
+
     if (uniqueRecipients.length === 0) {
-      broadcastToClients({ type: 'system', text: 'Group has no valid recipients', timestamp: Date.now() });
+      broadcastToClients({ type: 'system', text: 'Group has no valid recipients after resolution. Use /peers for exact keys.', timestamp: Date.now() });
       return;
     }
 
@@ -714,21 +731,16 @@ export function startWebServer(options: WebServerOptions): void {
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {
     const refs = text.slice('/group '.length).split(/[\s,]+/).map((v) => v.trim()).filter(Boolean);
-    const resolved = Array.from(new Set(refs.map((ref) => {
-      const byConfig = expandPeerRef(ref, configPeers, seenKeyStore);
-      if (byConfig) return byConfig;
-      for (const [peerKey, displayName] of peers.entries()) {
-        if (peerKey.startsWith(ref) || displayName.startsWith(ref) || displayName.includes(ref)) {
-          return peerKey;
-        }
-        if (ref.startsWith('...') && peerKey.endsWith(ref.slice(3))) {
-          return peerKey;
-        }
-      }
-      return null;
-    }).filter(Boolean) as string[]));
+    const batch = resolveRecipientReferences(refs, configPeers, peers, seenKeyStore);
+    const unresolved = batch.issues;
+    const resolved = Array.from(new Set(batch.recipients));
+
+    for (const issue of unresolved) {
+      ws.send(JSON.stringify({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() }));
+    }
+
     if (resolved.length === 0) {
-      ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group' }));
+      ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group (see recipient issue details above)' }));
     } else {
       ws.send(JSON.stringify({ type: 'group_tab', recipients: resolved }));
     }
