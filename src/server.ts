@@ -242,6 +242,17 @@ function App() {
         if (data.tabs && Array.isArray(data.tabs)) {
           setDmPeers(data.tabs);
         }
+      } else if (data.type === 'initial_group_tabs') {
+        // Auto-create group tabs from conversation history
+        if (data.tabs && Array.isArray(data.tabs)) {
+          setGroupTabs(data.tabs.map(tab => ({
+            id: tab.id,
+            label: tab.label,
+            peerKey: null,
+            recipients: tab.recipients,
+            ignored: false
+          })));
+        }
       } else if (data.type === 'peers') {
         setPeers(data.peers);
         // Update DM tab names when peers come online (in case tab was created before configPeers loaded)
@@ -516,7 +527,10 @@ export function startWebServer(options: WebServerOptions): void {
       const displayName = formatDisplayName(resolvedName, p.publicKey);
       peers.set(p.publicKey, displayName);
     }
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
+    // Include local user in peers list
+    const peersWithSelf = new Map(peers);
+    peersWithSelf.set(publicKey, ownDisplayName);
+    broadcastToClients({ type: 'peers', peers: Array.from(peersWithSelf.entries()).map(([key, name]) => ({ key, name })) });
     if (online.length > 0) {
       broadcastToClients({ type: 'system', text: online.length + ' peer(s) online', timestamp: Date.now() });
     }
@@ -568,7 +582,10 @@ export function startWebServer(options: WebServerOptions): void {
     const resolvedName = resolveDisplayName(peer.publicKey, configPeersWithSelf);
     const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.set(peer.publicKey, displayName);
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
+    // Include local user in peers list
+    const peersWithSelf = new Map(peers);
+    peersWithSelf.set(publicKey, ownDisplayName);
+    broadcastToClients({ type: 'peers', peers: Array.from(peersWithSelf.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {
       return;
     }
@@ -579,7 +596,10 @@ export function startWebServer(options: WebServerOptions): void {
     const resolvedName = resolveDisplayName(peer.publicKey, configPeersWithSelf);
     const displayName = formatDisplayName(resolvedName, peer.publicKey);
     peers.delete(peer.publicKey);
-    broadcastToClients({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) });
+    // Include local user in peers list
+    const peersWithSelf = new Map(peers);
+    peersWithSelf.set(publicKey, ownDisplayName);
+    broadcastToClients({ type: 'peers', peers: Array.from(peersWithSelf.entries()).map(([key, name]) => ({ key, name })) });
     if (isIgnoredPeer(peer.publicKey)) {
       return;
     }
@@ -594,11 +614,17 @@ export function startWebServer(options: WebServerOptions): void {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
     ws.send(JSON.stringify({ type: 'info', username }));
     ws.send(JSON.stringify({ type: 'config_peers', peers: configPeersWithSelf }));
-    ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peers.entries()).map(([key, name]) => ({ key, name })) }));
+    
+    // Include local user in peers list for simplicity
+    const peersWithSelf = new Map(peers);
+    peersWithSelf.set(publicKey, ownDisplayName);
+    ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peersWithSelf.entries()).map(([key, name]) => ({ key, name })) }));
     ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
 
-    // Extract unique DM recipients from message history and send as initial tabs
+    // Extract unique DM and group tabs from message history
     const dmRecipients = new Map<string, string>();
+    const groupRecipients = new Map<string, string[]>();
+    
     for (const msg of messages) {
       if (msg.to && msg.to.length === 1) {
         const recipient = msg.to[0];
@@ -606,9 +632,24 @@ export function startWebServer(options: WebServerOptions): void {
           const displayName = shortenPeerId(recipient, configPeersWithSelf);
           dmRecipients.set(recipient, displayName);
         }
+      } else if (msg.to && msg.to.length > 1) {
+        const sorted = Array.from(new Set(msg.to)).sort();
+        const key = sorted.join('|');
+        if (!groupRecipients.has(key)) {
+          groupRecipients.set(key, sorted);
+        }
       }
     }
+    
     ws.send(JSON.stringify({ type: 'initial_dm_tabs', tabs: Array.from(dmRecipients.entries()).map(([key, name]) => ({ key, name })) }));
+    
+    // Send initial group tabs with server-computed labels
+    const groupTabs = Array.from(groupRecipients.entries()).map(([id, recipients]) => ({
+      id,
+      recipients,
+      label: recipients.map(key => shortenPeerId(key, configPeersWithSelf)).join(', ')
+    }));
+    ws.send(JSON.stringify({ type: 'initial_group_tabs', tabs: groupTabs }));
 
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
