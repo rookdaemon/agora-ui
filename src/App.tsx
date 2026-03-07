@@ -141,7 +141,6 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         ensureGroupTab(msg.to);
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationPath]);
 
   useEffect(() => {
@@ -192,7 +191,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
         setActiveTab(tabId);
       }
       setChatMessages((prev) => trimMessages([...prev, msg]));
-      try { appendToConversation(msg, conversationPath, configPeers); } catch {}
+      try { appendToConversation(msg, conversationPath, configPeers); } catch { }
     });
 
     client.on('peer_online', (peer: RelayPeer) => {
@@ -228,7 +227,6 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       client.disconnect();
       relayRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [relayUrl, publicKey, privateKey, broadcastName, configPeers]);
 
   const handleCommand = (command: string): boolean => {
@@ -311,7 +309,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       to: cleanedRecipients,
     };
     setChatMessages((prev) => trimMessages([...prev, msg]));
-    try { appendToConversation(msg, conversationPath, configPeers); } catch {};
+    try { appendToConversation(msg, conversationPath, configPeers); } catch { };
   };
 
   const handleSubmit = (value: string): void => {
@@ -320,7 +318,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       return;
     }
 
-    try { appendToSent(value, sentPath); } catch {}
+    try { appendToSent(value, sentPath); } catch { }
     setSentHistory((prev) => [...prev, value]);
 
     if (value.startsWith('/')) {

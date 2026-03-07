@@ -208,11 +208,6 @@ function App() {
         setStatus(data.value);
       } else if (data.type === 'message') {
         setMessages(prev => [...prev, data]);
-        if (data.to && data.to.length > 0) {
-          for (const peerKey of data.to) {
-            setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerKey.slice(-8) }]);
-          }
-        }
       } else if (data.type === 'system') {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
       } else if (data.type === 'group_tab') {
@@ -521,7 +516,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const displayName = formatDisplayName(resolveDisplayName(from, configPeers), from);
     const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeers);
-    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: [from] };
+    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: envelope.to };
     messages.push(msg);
     {
       const lines = messages.map(m => formatMessageLine(m));
@@ -573,11 +568,11 @@ export function startWebServer(options: WebServerOptions): void {
         return;
       }
       if (parsed.type === 'send' && parsed.text) {
-        handleSend(parsed.text);
+        void handleSend(parsed.text);
       } else if (parsed.type === 'dm_send' && parsed.text && parsed.peerKey) {
-        handleDmSend(parsed.text, parsed.peerKey);
+        void handleDmSend(parsed.text, parsed.peerKey);
       } else if (parsed.type === 'group_send' && parsed.text && parsed.recipients && parsed.recipients.length > 0) {
-        handleGroupSend(parsed.text, parsed.recipients);
+        void handleGroupSend(parsed.text, parsed.recipients);
       } else if (parsed.type === 'group_resolve' && parsed.text) {
         handleGroupResolve(parsed.text, ws);
       } else if (parsed.type === 'command' && parsed.text) {
@@ -608,7 +603,7 @@ export function startWebServer(options: WebServerOptions): void {
     });
   });
 
-  const handleSend = (text: string): void => {
+  const handleSend = async (text: string): Promise<void> => {
     try { appendToSent(text, sentPath); } catch { /* ignore */ }
 
     if (!relay.connected()) {
@@ -623,12 +618,18 @@ export function startWebServer(options: WebServerOptions): void {
       const peerEntry = resolvedFromConfig
         ? [resolvedFromConfig, peers.get(resolvedFromConfig) ?? shortenPeerId(resolvedFromConfig, configPeers)] as const
         : Array.from(peers.entries()).find(
-            ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
-          );
+          ([key, name]) => name.startsWith(peerName) || key.startsWith(peerName)
+        );
       if (peerEntry) {
         const [peerKey] = peerEntry;
-        const expandedText = expandInlineRefs(dmText, configPeers, seenKeyStore);
-        void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
+        const expandedText = expandInlineRefs(dmText.trim(), configPeers, seenKeyStore);
+        const result = await relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
+
+        if (!result.ok && result.errors.length > 0) {
+          broadcastToClients({ type: 'system', text: `Failed to send to ${peerName}: ${result.errors[0].error}`, timestamp: Date.now() });
+          return;
+        }
+
         const dmMsg: Message = {
           from: ownDisplayName,
           text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeers),
@@ -647,7 +648,7 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'system', text: 'Broadcast is disabled. Use @peer or create a group tab.', timestamp: Date.now() });
   };
 
-  const handleDmSend = (text: string, peerKey: string): void => {
+  const handleDmSend = async (text: string, peerKey: string): Promise<void> => {
     try { appendToSent(text, sentPath); } catch { /* ignore */ }
 
     if (!relay.connected()) {
@@ -656,7 +657,14 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
-    void relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
+    const result = await relay.sendToRecipients([peerKey], 'publish', { text: expandedText });
+
+    if (!result.ok && result.errors.length > 0) {
+      const peerName = peers.get(peerKey) || ('@' + peerKey.slice(-8));
+      broadcastToClients({ type: 'system', text: `Failed to send to ${peerName}: ${result.errors[0].error}`, timestamp: Date.now() });
+      return;
+    }
+
     const dmMsg: Message = {
       from: ownDisplayName,
       text: compactInlineRefs(expandedText, configPeers),
@@ -668,7 +676,7 @@ export function startWebServer(options: WebServerOptions): void {
     broadcastToClients({ type: 'message', ...dmMsg });
   };
 
-  const handleGroupSend = (text: string, recipients: string[]): void => {
+  const handleGroupSend = async (text: string, recipients: string[]): Promise<void> => {
     try { appendToSent(text, sentPath); } catch { /* ignore */ }
 
     if (!relay.connected()) {
@@ -683,7 +691,15 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     const expandedText = expandInlineRefs(text, configPeers, seenKeyStore);
-    void relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText });
+    const result = await relay.sendToRecipients(uniqueRecipients, 'publish', { text: expandedText });
+
+    // Report any send errors
+    if (!result.ok && result.errors.length > 0) {
+      for (const err of result.errors) {
+        const peerName = peers.get(err.recipient) || ('@' + err.recipient.slice(-8));
+        broadcastToClients({ type: 'system', text: `Failed to send to ${peerName}: ${err.error}`, timestamp: Date.now() });
+      }
+    }
 
     const groupMsg: Message = {
       from: ownDisplayName,
