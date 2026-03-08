@@ -28,6 +28,36 @@ export interface WebServerOptions {
   security?: SecurityOptions;
 }
 
+function parseNameFromDisplay(displayName?: string): string | undefined {
+  if (!displayName || displayName.startsWith('@')) return undefined;
+  const atIndex = displayName.lastIndexOf('@');
+  if (atIndex <= 0) return undefined;
+  const parsed = displayName.slice(0, atIndex).trim();
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+export function resolveLocalName(
+  publicKey: string,
+  broadcastName: string | undefined,
+  configPeers: Record<string, AgoraPeerConfig>,
+  fallbackDisplayName?: string,
+): string | undefined {
+  if (broadcastName && broadcastName.trim().length > 0) {
+    return broadcastName.trim();
+  }
+  const fromPeers = Object.values(configPeers).find(
+    (peer) => peer?.publicKey === publicKey && typeof peer.name === 'string' && peer.name.trim().length > 0,
+  )?.name;
+  if (fromPeers && fromPeers.trim().length > 0) {
+    return fromPeers.trim();
+  }
+  return parseNameFromDisplay(fallbackDisplayName);
+}
+
+export function normalizeRecipientsForGrouping(recipients: string[], selfPublicKey?: string): string[] {
+  return Array.from(new Set(recipients.filter((id) => !!id && id !== selfPublicKey))).sort();
+}
+
 function openBrowser(url: string): void {
   const platform = process.platform;
   let cmd: string;
@@ -206,6 +236,7 @@ function App() {
   const [peers, setPeers] = useState([]);
   const [configPeers, setConfigPeers] = useState({});
   const [username, setUsername] = useState('');
+  const [selfKey, setSelfKey] = useState(null);
   const [input, setInput] = useState('');
   const [sentHistory, setSentHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -262,6 +293,7 @@ function App() {
         }));
       } else if (data.type === 'info') {
         setUsername(data.username);
+        if (data.publicKey) setSelfKey(data.publicKey);
       } else if (data.type === 'ignored_peers') {
         setIgnoredPeers(data.peers || []);
       } else if (data.type === 'clear') {
@@ -309,13 +341,25 @@ function App() {
     ...groupTabs,
   ];
 
+  const normalizeRecipients = (recipients) =>
+    Array.from(new Set((recipients || []).filter((id) => id && id !== selfKey))).sort();
+
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
   const visibleMessages = activeTab === 'inbox'
     ? messages
-    : messages.filter(m => m.from === 'system' || (m.to && activeTabMeta && m.to.some(key => activeTabMeta.recipients.includes(key))));
+    : messages.filter((m) => {
+      if (m.from === 'system') return true;
+      if (!m.to || !activeTabMeta) return false;
+      const normalized = normalizeRecipients(m.to);
+      const tabRecipients = activeTabMeta.recipients || [];
+      if (tabRecipients.length <= 1) {
+        return normalized.length === 1 && normalized[0] === tabRecipients[0];
+      }
+      return normalized.join('|') === tabRecipients.join('|');
+    });
 
   const upsertGroupTab = (recipients, serverLabel?) => {
-    const unique = Array.from(new Set(recipients)).filter(Boolean).sort();
+    const unique = normalizeRecipients(recipients);
     if (unique.length <= 1) {
       const peerKey = unique[0];
       if (!peerKey) return;
@@ -472,12 +516,14 @@ export function startWebServer(options: WebServerOptions): void {
     security,
   } = options;
 
+  const localName = resolveLocalName(publicKey, broadcastName, configPeers, username);
+
   // Add local user to configPeers so they can be looked up by publicKey
   const configPeersWithSelf: Record<string, AgoraPeerConfig> = {
     ...configPeers,
     [publicKey]: {
       publicKey,
-      name: broadcastName,
+      name: localName,
     },
   };
 
@@ -490,12 +536,13 @@ export function startWebServer(options: WebServerOptions): void {
   }
   const guard = new InboundMessageGuard({ ...security, ignoredPeers: ignoredPeersManager.listIgnoredPeers() });
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
-  const ownDisplayName = formatDisplayName(broadcastName, publicKey);
+  const ownDisplayName = formatDisplayName(localName, publicKey);
 
   console.error('[DEBUG] startWebServer:');
   console.error('[DEBUG]   publicKey:', publicKey.slice(-16));
   console.error('[DEBUG]   broadcastName:', broadcastName);
-  console.error('[DEBUG]   username:', username);
+  console.error('[DEBUG]   username (from CLI):', username);
+  console.error('[DEBUG]   localName (resolved):', localName);
   console.error('[DEBUG]   ownDisplayName:', ownDisplayName);
   console.error('[DEBUG]   configPeersWithSelf has local user:', publicKey in configPeersWithSelf);
 
@@ -515,7 +562,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
   };
 
-  const relay = new RelayClient({ relayUrl, publicKey, privateKey, name: broadcastName });
+  const relay = new RelayClient({ relayUrl, publicKey, privateKey, name: localName });
 
   const broadcastIgnoredPeers = (): void => {
     const ignored = guard.listIgnoredPeers();
@@ -619,7 +666,7 @@ export function startWebServer(options: WebServerOptions): void {
 
   wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'status', value: relayStatus }));
-    ws.send(JSON.stringify({ type: 'info', username }));
+    ws.send(JSON.stringify({ type: 'info', username: ownDisplayName, publicKey }));
     ws.send(JSON.stringify({ type: 'config_peers', peers: configPeersWithSelf }));
 
     // Include local user in peers list for simplicity
@@ -641,7 +688,7 @@ export function startWebServer(options: WebServerOptions): void {
         }
       } else if (msg.to && msg.to.length > 1) {
         // Normalize: exclude self, deduplicate, and sort for canonical group ID
-        const normalized = Array.from(new Set(msg.to.filter(id => id !== publicKey))).sort();
+        const normalized = normalizeRecipientsForGrouping(msg.to, publicKey);
         // Only create group tab if 2+ recipients remain (otherwise it's a DM)
         if (normalized.length > 1) {
           const key = normalized.join('|');
@@ -809,7 +856,7 @@ export function startWebServer(options: WebServerOptions): void {
     const resolvedRecipients = resolvedBatch.recipients;
 
     // Normalize: exclude self, deduplicate, and sort for consistent grouping
-    const uniqueRecipients = Array.from(new Set(resolvedRecipients.filter((id) => id !== publicKey))).sort();
+    const uniqueRecipients = normalizeRecipientsForGrouping(resolvedRecipients, publicKey);
 
     for (const issue of resolutionIssues) {
       broadcastToClients({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() });
@@ -847,7 +894,7 @@ export function startWebServer(options: WebServerOptions): void {
     const batch = resolveRecipientReferences(refs, configPeersWithSelf, peers, seenKeyStore);
     const unresolved = batch.issues;
     // Normalize: exclude self, deduplicate, and sort
-    const resolved = Array.from(new Set(batch.recipients.filter(id => id !== publicKey))).sort();
+    const resolved = normalizeRecipientsForGrouping(batch.recipients, publicKey);
 
     for (const issue of unresolved) {
       ws.send(JSON.stringify({ type: 'system', text: `Group recipient issue: ${issue}`, timestamp: Date.now() }));
