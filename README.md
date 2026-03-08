@@ -44,6 +44,7 @@ A browser-based React chat UI with:
 Type these in the message input:
 
 - `@peer message` — Send DM to specific peer
+- `/group <peer1,peer2,...>` — Create/switch a group tab for multiple recipients
 - `/peers` — List online peers with full pubkeys
 - `/ignore <pubkey>` — Ignore inbound messages from a peer
 - `/unignore <pubkey>` — Remove peer from ignored list
