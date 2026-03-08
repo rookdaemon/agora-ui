@@ -38,11 +38,13 @@ export function formatMessageLine(msg: Message, directory?: PeerReferenceDirecto
 export function parseMessageLine(line: string, directory?: PeerReferenceDirectory): Message | null {
   const entry = parseConversationLine(line);
   if (!entry) return null;
+  const fromKey = directory ? expand(entry.from, directory) : undefined;
   const to = directory
     ? entry.to.map(ref => expand(ref, directory)).filter((v): v is string => Boolean(v))
     : [];
   return {
     from: entry.from,
+    fromKey: fromKey || undefined,
     text: entry.text,
     timestamp: entry.timestamp,
     to: to.length > 0 ? to : undefined,

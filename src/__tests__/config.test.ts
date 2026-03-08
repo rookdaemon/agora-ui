@@ -84,7 +84,7 @@ describe('Config Loading', () => {
     expect(loaded.peers).toEqual({});
   });
 
-  it('should preserve peers when explicitly defined in config', () => {
+  it('should normalize peers by publicKey when explicitly defined in config', () => {
     const config = {
       identity: {
         publicKey: '302a300506032b657003210012345678',
@@ -97,7 +97,10 @@ describe('Config Loading', () => {
     };
     writeFileSync(TEST_CONFIG_PATH, JSON.stringify(config));
     const loaded = loadConfig(TEST_CONFIG_PATH);
-    expect(loaded.peers).toEqual(config.peers);
+    expect(loaded.peers).toEqual({
+      aaaa: { publicKey: 'aaaa', name: 'alice' },
+      bbbb: { publicKey: 'bbbb', name: 'bob' },
+    });
   });
 });
 

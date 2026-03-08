@@ -58,6 +58,34 @@ export function normalizeRecipientsForGrouping(recipients: string[], selfPublicK
   return Array.from(new Set(recipients.filter((id) => !!id && id !== selfPublicKey))).sort();
 }
 
+export function shortHash(input: string): string {
+  // FNV-1a 32-bit hash for stable, compact tab identifiers.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 8);
+}
+
+export function deriveTabFromParticipants(
+  participants: string[],
+  selfPublicKey: string,
+  configPeers: Record<string, AgoraPeerConfig>,
+): { id: string; recipients: string[]; label: string; canonical: string } | null {
+  const canonicalIds = Array.from(new Set(participants.filter(Boolean))).sort();
+  if (canonicalIds.length === 0) return null;
+
+  const canonical = canonicalIds.join(',');
+  const id = 'tab-' + shortHash(canonical);
+  const recipients = canonicalIds.filter((id) => id !== selfPublicKey);
+  const label = recipients.length > 0
+    ? recipients.map((key) => shortenPeerId(key, configPeers)).join(', ')
+    : 'Self';
+
+  return { id, recipients, label, canonical };
+}
+
 function openBrowser(url: string): void {
   const platform = process.platform;
   let cmd: string;
@@ -196,35 +224,33 @@ function Header({ status, username, onlinePeers, ignoredPeers, onPeerClick }) {
   );
 }
 
-function MessageItem({ msg, myDisplayName, configPeers }) {
+function MessageItem({ msg, myDisplayName, myPublicKey, configPeers, isInboxView }) {
   const isSystem = msg.from === 'system';
   const isMe = !isSystem && msg.from === myDisplayName;
   const senderClass = isMe ? 'msg-sender-me' : 'msg-sender-other';
-  const senderLabel = isMe ? 'You' : msg.from;
-  
-  // Format TO: recipients if present
-  let toLabel = '';
-  if (!isSystem && msg.to && msg.to.length > 0) {
-    // Use browser's configPeers to get short names - fallback to suffix
-    const toNames = msg.to.map(key => {
-      // Try to find peer by publicKey in configPeers
-      const peer = Object.values(configPeers || {}).find(p => p?.publicKey === key);
-      if (peer?.name) {
-        return peer.name + '@' + key.slice(-8);
-      }
-      return '@' + key.slice(-8);
-    });
-    toLabel = ' To: ' + toNames.join(', ');
-  }
+  const resolvePeerLabel = (key) => {
+    const peer = Object.values(configPeers || {}).find(p => p?.publicKey === key);
+    return peer?.name ? (peer.name + '@' + key.slice(-8)) : ('@' + key.slice(-8));
+  };
+
+  const senderLabel = isMe
+    ? 'You'
+    : (msg.fromKey ? resolvePeerLabel(msg.fromKey) : msg.from);
+
+  const recipientLabels = (msg.to || []).map(resolvePeerLabel);
+  const toLabel = recipientLabels.length > 0 ? recipientLabels.join(', ') : '(none)';
   
   return (
     <div className={'msg' + (isSystem ? ' msg-system' : '')}>
       <span className="msg-time">[{formatTime(msg.timestamp)}]</span>
       <span className="msg-body">
-        {!isSystem && <span className={'msg-sender ' + senderClass}>{senderLabel}: </span>}
-        <span className="msg-text">{msg.text}</span>
-        {toLabel && <span className="dm-badge">{toLabel}</span>}
-        {!isSystem && !toLabel && <span className="dm-badge">(P2P)</span>}
+        {!isSystem && (
+          <div>
+            <span className={'msg-sender ' + senderClass}>FROM: {senderLabel}</span>
+            {isInboxView && <span className="dm-badge"> TO: {toLabel}</span>}
+          </div>
+        )}
+        <div className="msg-text">{msg.text}</div>
       </span>
     </div>
   );
@@ -241,8 +267,7 @@ function App() {
   const [sentHistory, setSentHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [activeTab, setActiveTab] = useState('inbox');
-  const [dmPeers, setDmPeers] = useState([]);
-  const [groupTabs, setGroupTabs] = useState([]);
+  const [tabsById, setTabsById] = useState({});
   const [ignoredPeers, setIgnoredPeers] = useState([]);
   const draftRef = useRef('');
   const wsRef = useRef(null);
@@ -258,39 +283,20 @@ function App() {
         setStatus(data.value);
       } else if (data.type === 'message') {
         setMessages(prev => [...prev, data]);
+        const tabMeta = computeMessageTab(data);
+        if (tabMeta) ensureTab(tabMeta);
       } else if (data.type === 'system') {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
       } else if (data.type === 'group_tab') {
         if (data.recipients && data.recipients.length > 0) {
-          upsertGroupTab(data.recipients, data.label);
+          openTabForParticipants(data.recipients);
         } else {
           setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
         }
       } else if (data.type === 'config_peers') {
         setConfigPeers(data.peers || {});
-      } else if (data.type === 'initial_dm_tabs') {
-        // Auto-create DM tabs from conversation history
-        if (data.tabs && Array.isArray(data.tabs)) {
-          setDmPeers(data.tabs);
-        }
-      } else if (data.type === 'initial_group_tabs') {
-        // Auto-create group tabs from conversation history
-        if (data.tabs && Array.isArray(data.tabs)) {
-          setGroupTabs(data.tabs.map(tab => ({
-            id: tab.id,
-            label: tab.label,
-            peerKey: null,
-            recipients: tab.recipients,
-            ignored: false
-          })));
-        }
       } else if (data.type === 'peers') {
         setPeers(data.peers);
-        // Update DM tab names when peers come online (in case tab was created before configPeers loaded)
-        setDmPeers(prev => prev.map(dp => {
-          const match = data.peers.find(p => p.key === dp.key);
-          return match ? { ...dp, name: match.name } : dp;
-        }));
       } else if (data.type === 'info') {
         setUsername(data.username);
         if (data.publicKey) setSelfKey(data.publicKey);
@@ -310,83 +316,105 @@ function App() {
     bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
   }, [messages, activeTab]);
 
+  const shortHash = (input) => {
+    let hash = 0x811c9dc5;
+    for (let i = 0; i < input.length; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, 0x01000193);
+    }
+    return ((hash >>> 0).toString(16).padStart(8, '0')).slice(0, 8);
+  };
+
+  const normalizeIds = (ids) => Array.from(new Set((ids || []).filter(Boolean))).sort();
+
+  const shortPeerLabel = (peerKey) => {
+    const peer = Object.values(configPeers || {}).find(p => p?.publicKey === peerKey);
+    return peer?.name ? (peer.name + '@' + peerKey.slice(-8)) : ('@' + peerKey.slice(-8));
+  };
+
+  const buildTabFromParticipants = (participantIds) => {
+    const canonicalIds = normalizeIds(participantIds);
+    if (canonicalIds.length === 0) return null;
+    const canonical = canonicalIds.join(',');
+    const id = 'tab-' + shortHash(canonical);
+    const recipients = canonicalIds.filter((key) => key !== selfKey);
+    const label = recipients.length > 0 ? recipients.map(shortPeerLabel).join(', ') : 'Self';
+    return { id, canonical, recipients, label, ignored: false, peerKey: recipients.length === 1 ? recipients[0] : null };
+  };
+
+  const computeMessageTab = (msg) => {
+    if (!selfKey || msg.from === 'system') return null;
+    const participantIds = [selfKey, ...(msg.to || [])];
+    if (msg.fromKey) participantIds.push(msg.fromKey);
+    return buildTabFromParticipants(participantIds);
+  };
+
+  const ensureTab = (tabMeta) => {
+    if (!tabMeta || !tabMeta.id || tabMeta.id === 'inbox') return;
+    setTabsById(prev => {
+      const existing = prev[tabMeta.id];
+      if (existing) {
+        if (existing.label === tabMeta.label && existing.ignored === !!tabMeta.ignored) {
+          return prev;
+        }
+        return { ...prev, [tabMeta.id]: { ...existing, ...tabMeta } };
+      }
+      return { ...prev, [tabMeta.id]: tabMeta };
+    });
+  };
+
+  useEffect(() => {
+    if (!selfKey) return;
+    for (const msg of messages) {
+      const tab = computeMessageTab(msg);
+      if (tab) ensureTab(tab);
+    }
+  }, [messages, selfKey]);
+
+  useEffect(() => {
+    setTabsById(prev => {
+      const next = {};
+      let changed = false;
+      for (const [id, tab] of Object.entries(prev)) {
+        const recipients = tab.recipients || [];
+        const refreshedLabel = recipients.length > 0 ? recipients.map(shortPeerLabel).join(', ') : tab.label;
+        const refreshedIgnored = recipients.length === 1 ? ignoredPeers.includes(recipients[0]) : false;
+        const updated = { ...tab, label: refreshedLabel, ignored: refreshedIgnored };
+        next[id] = updated;
+        if (!changed && (updated.label !== tab.label || updated.ignored !== tab.ignored)) {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [configPeers, ignoredPeers]);
+
   const visibleOnlinePeers = peers.filter((peer) => !ignoredPeers.includes(peer.key));
-  const allPeerMap = new Map();
-  peers.forEach((peer) => allPeerMap.set(peer.key, { key: peer.key, name: peer.name, ignored: ignoredPeers.includes(peer.key) }));
-  dmPeers.forEach((peer) => {
-    if (!allPeerMap.has(peer.key)) {
-      allPeerMap.set(peer.key, { key: peer.key, name: peer.name, ignored: ignoredPeers.includes(peer.key) });
-    }
-  });
-  ignoredPeers.forEach((key) => {
-    if (!allPeerMap.has(key)) {
-      allPeerMap.set(key, { key, name: '@' + key.slice(-8), ignored: true });
-    } else {
-      const existing = allPeerMap.get(key);
-      allPeerMap.set(key, { ...existing, ignored: true });
-    }
-  });
-
-  const peerTabs = Array.from(allPeerMap.values()).map((peer) => ({
-    id: peer.key,
-    label: peer.name,
-    peerKey: peer.key,
-    recipients: [peer.key],
-    ignored: peer.ignored,
-  }));
-
   const tabs = [
     { id: 'inbox', label: 'Inbox', peerKey: null, recipients: [], ignored: false },
-    ...peerTabs,
-    ...groupTabs,
+    ...Object.values(tabsById),
   ];
-
-  const normalizeRecipients = (recipients) =>
-    Array.from(new Set((recipients || []).filter((id) => id && id !== selfKey))).sort();
 
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
   const visibleMessages = activeTab === 'inbox'
     ? messages
     : messages.filter((m) => {
       if (m.from === 'system') return true;
-      if (!m.to || !activeTabMeta) return false;
-      const normalized = normalizeRecipients(m.to);
-      const tabRecipients = activeTabMeta.recipients || [];
-      if (tabRecipients.length <= 1) {
-        return normalized.length === 1 && normalized[0] === tabRecipients[0];
-      }
-      return normalized.join('|') === tabRecipients.join('|');
+      if (!activeTabMeta || !selfKey) return false;
+      const tabMeta = computeMessageTab(m);
+      return !!tabMeta && tabMeta.id === activeTabMeta.id;
     });
 
-  const upsertGroupTab = (recipients, serverLabel?) => {
-    const unique = normalizeRecipients(recipients);
-    if (unique.length <= 1) {
-      const peerKey = unique[0];
-      if (!peerKey) return;
-      // Lookup name in configPeers (not online peers)
-      const peer = Object.values(configPeers || {}).find(p => p?.publicKey === peerKey);
-      const peerName = peer?.name ? (peer.name + '@' + peerKey.slice(-8)) : ('@' + peerKey.slice(-8));
-      setDmPeers(prev => prev.some(p => p.key === peerKey) ? prev : [...prev, { key: peerKey, name: peerName }]);
-      setActiveTab(peerKey);
-      return;
-    }
-
-    const id = unique.join('|');
-    setGroupTabs(prev => {
-      const existing = prev.find((tab) => tab.id === id);
-      if (existing) return prev;
-      // Use server-provided label if available, otherwise compute from configPeers
-      const label = serverLabel || unique.map((peerKey) => {
-        const peer = Object.values(configPeers || {}).find(p => p?.publicKey === peerKey);
-        return peer?.name ? (peer.name + '@' + peerKey.slice(-8)) : ('@' + peerKey.slice(-8));
-      }).join(', ');
-      return [...prev, { id, label, peerKey: null, recipients: unique, ignored: false }];
-    });
-    setActiveTab(id);
+  const openTabForParticipants = (participantIds) => {
+    if (!selfKey) return;
+    const tab = buildTabFromParticipants([selfKey, ...(participantIds || [])]);
+    if (!tab) return;
+    ensureTab(tab);
+    setActiveTab(tab.id);
   };
 
   const openPeerTab = (peer) => {
-    upsertGroupTab([peer.key]);
+    openTabForParticipants([peer.key]);
   };
 
   const toggleIgnorePeer = (peerKey) => {
@@ -416,8 +444,8 @@ function App() {
     } else if (activeTab !== 'inbox' && !text.startsWith('@')) {
       if (activeTabMeta && activeTabMeta.recipients.length > 1) {
         ws.send(JSON.stringify({ type: 'group_send', text, recipients: activeTabMeta.recipients }));
-      } else {
-        ws.send(JSON.stringify({ type: 'dm_send', text, peerKey: activeTab }));
+      } else if (activeTabMeta && activeTabMeta.recipients.length === 1) {
+        ws.send(JSON.stringify({ type: 'dm_send', text, peerKey: activeTabMeta.recipients[0] }));
       }
     } else {
       ws.send(JSON.stringify({ type: 'send', text }));
@@ -482,7 +510,16 @@ function App() {
       <div className="messages">
         {visibleMessages.length === 0
           ? <div className="messages-empty">No messages yet. Type a message and press Enter to send.</div>
-          : visibleMessages.map((msg, i) => <MessageItem key={i} msg={msg} myDisplayName={username} configPeers={configPeers} />)
+          : visibleMessages.map((msg, i) => (
+            <MessageItem
+              key={i}
+              msg={msg}
+              myDisplayName={username}
+              myPublicKey={selfKey}
+              configPeers={configPeers}
+              isInboxView={activeTab === 'inbox'}
+            />
+          ))
         }
         <div ref={bottomRef} />
       </div>
@@ -621,7 +658,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const displayName = formatDisplayName(resolveDisplayName(from, configPeersWithSelf), from);
     const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeersWithSelf);
-    const msg: Message = { from: displayName, text, timestamp: envelope.timestamp, to: envelope.to };
+    const msg: Message = { from: displayName, fromKey: from, text, timestamp: envelope.timestamp, to: envelope.to };
     messages.push(msg);
     {
       const lines = messages.map(m => formatMessageLine(m));
@@ -675,46 +712,7 @@ export function startWebServer(options: WebServerOptions): void {
     ws.send(JSON.stringify({ type: 'peers', peers: Array.from(peersWithSelf.entries()).map(([key, name]) => ({ key, name })) }));
     ws.send(JSON.stringify({ type: 'ignored_peers', peers: guard.listIgnoredPeers() }));
 
-    // Extract unique DM and group tabs from message history
-    const dmRecipients = new Map<string, string>();
-    const groupRecipients = new Map<string, string[]>();
-
-    for (const msg of messages) {
-      if (msg.to && msg.to.length === 1) {
-        const recipient = msg.to[0];
-        if (!dmRecipients.has(recipient)) {
-          const displayName = shortenPeerId(recipient, configPeersWithSelf);
-          dmRecipients.set(recipient, displayName);
-        }
-      } else if (msg.to && msg.to.length > 1) {
-        // Normalize: exclude self, deduplicate, and sort for canonical group ID
-        const normalized = normalizeRecipientsForGrouping(msg.to, publicKey);
-        // Only create group tab if 2+ recipients remain (otherwise it's a DM)
-        if (normalized.length > 1) {
-          const key = normalized.join('|');
-          if (!groupRecipients.has(key)) {
-            groupRecipients.set(key, normalized);
-          }
-        }
-      }
-    }
-
-    console.error('[DEBUG] Initial tabs extraction:');
-    console.error('[DEBUG]   DM tabs:', dmRecipients.size);
-    console.error('[DEBUG]   Group tabs:', groupRecipients.size);
-    if (groupRecipients.size > 0) {
-      console.error('[DEBUG]   Group tab keys:', Array.from(groupRecipients.keys()).map(k => k.split('|').map(id => id.slice(-8)).join(',')));
-    }
-
-    ws.send(JSON.stringify({ type: 'initial_dm_tabs', tabs: Array.from(dmRecipients.entries()).map(([key, name]) => ({ key, name })) }));
-
-    // Send initial group tabs with server-computed labels
-    const groupTabs = Array.from(groupRecipients.entries()).map(([id, recipients]) => ({
-      id,
-      recipients,
-      label: recipients.map(key => shortenPeerId(key, configPeersWithSelf)).join(', ')
-    }));
-    ws.send(JSON.stringify({ type: 'initial_group_tabs', tabs: groupTabs }));
+    // Tabs are reconstructed client-side from each message's participant set.
 
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
@@ -791,6 +789,7 @@ export function startWebServer(options: WebServerOptions): void {
 
         const dmMsg: Message = {
           from: ownDisplayName,
+          fromKey: publicKey,
           text: '@' + peerName + ': ' + compactInlineRefs(expandedText, configPeersWithSelf),
           timestamp: Date.now(),
           to: [peerKey],
@@ -834,6 +833,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const dmMsg: Message = {
       from: ownDisplayName,
+      fromKey: publicKey,
       text: compactInlineRefs(expandedText, configPeersWithSelf),
       timestamp: Date.now(),
       to: [targetPeerKey],
@@ -880,6 +880,7 @@ export function startWebServer(options: WebServerOptions): void {
 
     const groupMsg: Message = {
       from: ownDisplayName,
+      fromKey: publicKey,
       text: compactInlineRefs(expandedText, configPeersWithSelf),
       timestamp: Date.now(),
       to: uniqueRecipients,

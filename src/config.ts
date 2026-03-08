@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'fs';
 
 /** Config shape used by the UI (identity + optional relay URL + peers). */
 export type AgoraConfig = Pick<AgoraConfigLoaded, 'identity' | 'peers'> & {
-  relay?: { url: string };
+  relay?: { url: string; name?: string };
 };
 
 /**
@@ -183,10 +183,27 @@ export function loadConfig(configPath?: string): AgoraConfig & { identity: { pub
 
   // Use the already-parsed and validated config
   const config = parsedConfig as AgoraConfigLoaded;
+  const normalizedPeers: Record<string, NonNullable<AgoraConfigLoaded['peers']>[string]> = {};
+  for (const [key, peer] of Object.entries(config.peers || {})) {
+    if (!peer || typeof peer.publicKey !== 'string' || peer.publicKey.length === 0) {
+      continue;
+    }
+    normalizedPeers[peer.publicKey] = {
+      ...peer,
+      // Preserve explicit name; fallback to object key for legacy name-keyed peers.
+      name: typeof peer.name === 'string' ? peer.name : (key !== peer.publicKey ? key : undefined),
+    };
+  }
+
   return {
     identity: config.identity,
-    peers: config.peers || {},
-    relay: config.relay ? { url: config.relay.url } : undefined,
+    peers: normalizedPeers,
+    relay: config.relay
+      ? {
+        url: config.relay.url,
+        name: typeof config.relay.name === 'string' ? config.relay.name : undefined,
+      }
+      : undefined,
   };
 }
 

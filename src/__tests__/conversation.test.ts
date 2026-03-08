@@ -97,6 +97,30 @@ describe('parseMessageLine', () => {
     expect(msg!.to).toEqual([ALICE_KEY, BOB_KEY]);
   });
 
+  it('parses real-like mixed-key peers and includes bishop recipient', () => {
+    const SELF_KEY = '302a300506032b6570032100b01df4d4d0dbefe25ba8c03ed3e09c2126ff8f61b3ae02a9c80a97809f38f6d0';
+    const NOVA_KEY = '302a300506032b657003210001e16c1faa9ebcfec73993085012a7a91f6e0138bb61ce73ff511a299499c2bd';
+    const ROOK_KEY = '302a300506032b65700321006d683326589a22076a78997ed013c6f47fa3d8faed79e71e03ce84de11251b69';
+    const BISHOP_KEY = '302a300506032b6570032100c46059701dc810ed45ec3bed714e84aa46b8e2df043f89e23979ff9067893eb4';
+
+    // Mirrors real config shape where peers may be keyed by either key or alias.
+    const mixedDirectory = {
+      [SELF_KEY]: { publicKey: SELF_KEY, name: 'stefan' },
+      [NOVA_KEY]: { publicKey: NOVA_KEY, name: 'nova' },
+      [ROOK_KEY]: { publicKey: ROOK_KEY, name: 'rook' },
+      bishop: { publicKey: BISHOP_KEY, name: 'bishop' },
+    };
+
+    const line = '[2026-03-07T14:46:56.578Z] **FROM:** @9f38f6d0 **TO:** nova@9499c2bd, rook@11251b69, bishop@67893eb4 Good news; Bishop is back!';
+    const msg = parseMessageLine(line, mixedDirectory);
+
+    expect(msg).not.toBeNull();
+    expect(msg!.from).toBe('@9f38f6d0');
+    expect(msg!.fromKey).toBe(SELF_KEY);
+    expect(msg!.to).toEqual([NOVA_KEY, ROOK_KEY, BISHOP_KEY]);
+    expect(msg!.text).toBe('Good news; Bishop is back!');
+  });
+
   it('handles empty text', () => {
     const line = '[2023-11-14T22:13:20.000Z] **FROM:** alice@99990000 **TO:** bob@ffff1234';
     const msg = parseMessageLine(line, DIRECTORY);

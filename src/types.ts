@@ -14,6 +14,8 @@ export type AgoraConfig = Pick<AgoraConfigLoaded, 'identity' | 'peers'> & {
 
 export interface Message {
   from: string;
+  /** Sender public key when known; used for deterministic tab routing. */
+  fromKey?: string;
   text: string;
   timestamp: number;
   /** Conversation partner public keys (for tab routing) */
