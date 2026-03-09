@@ -272,6 +272,9 @@ function App() {
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
+  const pendingGroupRecipientsRef = useRef(null);
+
+  const isGroupCommand = (text) => /^\\/group(\\s|$)/.test(text);
 
   useEffect(() => {
     const ws = new WebSocket('ws://' + location.host);
@@ -289,7 +292,26 @@ function App() {
         setMessages(prev => [...prev, { ...data, from: 'system' }]);
       } else if (data.type === 'group_tab') {
         if (data.recipients && data.recipients.length > 0) {
-          openTabForParticipants(data.recipients);
+          // Route /group through the same participant-to-tab derivation path as normal messages.
+          const seed = {
+            from: '__group_seed__',
+            fromKey: selfKey,
+            text: '',
+            timestamp: Date.now(),
+            to: data.recipients,
+            tabSeed: true,
+          };
+          setMessages(prev => [...prev, seed]);
+          if (selfKey) {
+            const tabMeta = computeMessageTab(seed);
+            if (tabMeta) {
+              ensureTab(tabMeta);
+              setActiveTab(tabMeta.id);
+            }
+          } else {
+            // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
+            pendingGroupRecipientsRef.current = data.recipients;
+          }
         } else {
           setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
         }
@@ -311,6 +333,25 @@ function App() {
 
     return () => ws.close();
   }, []);
+
+  useEffect(() => {
+    if (!selfKey || !pendingGroupRecipientsRef.current) return;
+    const recipients = pendingGroupRecipientsRef.current;
+    pendingGroupRecipientsRef.current = null;
+    const seed = {
+      from: '__group_seed__',
+      fromKey: selfKey,
+      text: '',
+      timestamp: Date.now(),
+      to: recipients,
+      tabSeed: true,
+    };
+    const tabMeta = computeMessageTab(seed);
+    if (tabMeta) {
+      ensureTab(tabMeta);
+      setActiveTab(tabMeta.id);
+    }
+  }, [selfKey]);
 
   useEffect(() => {
     bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
@@ -397,8 +438,9 @@ function App() {
 
   const activeTabMeta = tabs.find((tab) => tab.id === activeTab);
   const visibleMessages = activeTab === 'inbox'
-    ? messages
+    ? messages.filter((m) => !m.tabSeed)
     : messages.filter((m) => {
+      if (m.tabSeed) return false;
       if (m.from === 'system') return true;
       if (!activeTabMeta || !selfKey) return false;
       const tabMeta = computeMessageTab(m);
@@ -435,8 +477,8 @@ function App() {
     setSentHistory(prev => [...prev, text]);
     setHistoryIndex(-1);
     draftRef.current = '';
-    if (text.startsWith('/group ') || text.startsWith('/')) {
-      if (text.startsWith('/group ')) {
+    if (isGroupCommand(text) || text.startsWith('/')) {
+      if (isGroupCommand(text)) {
         ws.send(JSON.stringify({ type: 'group_resolve', text }));
       } else {
         ws.send(JSON.stringify({ type: 'command', text }));
