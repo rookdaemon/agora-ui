@@ -148,6 +148,8 @@ const HTML = `<!DOCTYPE html>
     .load-more-wrap { display: flex; justify-content: center; padding: 4px 0 6px; }
     .load-more { background: none; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; font-size: 0.8rem; cursor: pointer; padding: 3px 12px; }
     .load-more:hover { border-color: #8b949e; color: #c9d1d9; }
+    .new-msg-pill { position: sticky; bottom: 8px; align-self: center; background: #1f6feb; color: #fff; border: none; border-radius: 16px; padding: 5px 16px; font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 2; }
+    .new-msg-pill:hover { background: #388bfd; }
     .msg { font-size: 0.88rem; line-height: 1.5; padding: 1px 0; display: flex; gap: 8px; }
     .msg-time { color: #484f58; flex-shrink: 0; }
     .msg-body { flex: 1; word-break: break-word; }
@@ -273,9 +275,13 @@ function App() {
   const [tabsById, setTabsById] = useState({});
   const [ignoredPeers, setIgnoredPeers] = useState([]);
   const [hasMore, setHasMore] = useState(false);
+  const [newMsgCount, setNewMsgCount] = useState(0);
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
+  const messagesRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const anchorRef = useRef(null);
   const pendingGroupRecipientsRef = useRef(null);
 
   const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
@@ -290,6 +296,7 @@ function App() {
         setStatus(data.value);
       } else if (data.type === 'message') {
         setMessages(prev => [...prev, data]);
+        if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
         const tabMeta = computeMessageTab(data);
         if (tabMeta) ensureTab(tabMeta);
       } else if (data.type === 'system') {
@@ -331,6 +338,12 @@ function App() {
       } else if (data.type === 'has_more') {
         setHasMore(data.value);
       } else if (data.type === 'older_messages') {
+        // Anchor: remember the first currently-visible message element
+        const container = messagesRef.current;
+        if (container) {
+          const firstMsg = container.querySelector('.msg');
+          if (firstMsg) anchorRef.current = firstMsg;
+        }
         setMessages(prev => [...data.messages, ...prev]);
         setHasMore(data.hasMore);
       } else if (data.type === 'clear') {
@@ -362,9 +375,34 @@ function App() {
     }
   }, [selfKey]);
 
+  // Scroll position anchoring after loading older messages
   useEffect(() => {
-    bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (anchorRef.current) {
+      anchorRef.current.scrollIntoView({ block: 'start' });
+      anchorRef.current = null;
+    }
+  });
+
+  // Smart auto-scroll: only scroll to bottom if user is near the bottom
+  useEffect(() => {
+    if (isNearBottomRef.current && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, activeTab]);
+
+  // Track scroll position to determine isNearBottom
+  useEffect(() => {
+    const container = messagesRef.current;
+    if (!container) return;
+    const onScroll = () => {
+      const threshold = 60;
+      const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+      isNearBottomRef.current = atBottom;
+      if (atBottom) setNewMsgCount(0);
+    };
+    container.addEventListener('scroll', onScroll);
+    return () => container.removeEventListener('scroll', onScroll);
+  }, []);
 
   const shortHash = (input) => {
     let hash = 0x811c9dc5;
@@ -558,7 +596,7 @@ function App() {
           ))}
         </div>
       )}
-      <div className="messages">
+      <div className="messages" ref={messagesRef}>
         {hasMore && (
           <div className="load-more-wrap">
             <button className="load-more" onClick={() => {
@@ -584,6 +622,12 @@ function App() {
           ))
         }
         <div ref={bottomRef} />
+        {newMsgCount > 0 && (
+          <button className="new-msg-pill" onClick={() => {
+            bottomRef.current && bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+            setNewMsgCount(0);
+          }}>↓ {newMsgCount} new message{newMsgCount > 1 ? 's' : ''}</button>
+        )}
       </div>
       <div className="input-row">
         <textarea
