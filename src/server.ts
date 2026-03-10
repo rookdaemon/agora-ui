@@ -274,7 +274,7 @@ function App() {
   const bottomRef = useRef(null);
   const pendingGroupRecipientsRef = useRef(null);
 
-  const isGroupCommand = (text) => /^\\/group(\\s|$)/.test(text);
+  const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
 
   useEffect(() => {
     const ws = new WebSocket('ws://' + location.host);
@@ -521,7 +521,7 @@ function App() {
   };
 
   const tabPlaceholder = activeTab === 'inbox'
-    ? 'Type @peer msg or /group p1,p2 then send'
+    ? 'Type @peer msg or /group p1 p2 then send'
     : 'Type message to ' + (activeTabMeta?.label || '...');
 
   return (
@@ -845,7 +845,7 @@ export function startWebServer(options: WebServerOptions): void {
       return;
     }
 
-    broadcastToClients({ type: 'system', text: 'Broadcast is disabled. Use @peer or create a group tab.', timestamp: Date.now() });
+    broadcastToClients({ type: 'system', text: 'No recipient selected. Use @peer to DM, or /group peer1 peer2 to create a group tab.', timestamp: Date.now() });
   };
 
   const handleDmSend = async (text: string, peerKey: string): Promise<void> => {
@@ -944,7 +944,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
 
     if (resolved.length === 0) {
-      ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group (see recipient issue details above)' }));
+      ws.send(JSON.stringify({ type: 'group_tab', recipients: [], error: 'No valid recipients for /group — check peer names are correct and online (see details above)' }));
     } else {
       // Compute display label on server side where we have configPeersWithSelf and can use shortenPeerId
       const label = resolved.map(key => shortenPeerId(key, configPeersWithSelf)).join(', ');
@@ -973,7 +973,7 @@ export function startWebServer(options: WebServerOptions): void {
       [
         'Commands:',
         '  @peer message — Send to specific peer',
-        '  /group <peer1,peer2,...> — Create/switch a group tab',
+        '  /group <peer1 peer2 ...> — Create/switch a group tab (comma or space separated)',
         '  /peers — List online peers with public keys',
         '  /ignore <pubkey> — Ignore inbound messages from a peer',
         '  /unignore <pubkey> — Remove a peer from ignore list',

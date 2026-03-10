@@ -248,7 +248,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
     if (cmd === '/help') {
       addSystemMessage('Commands:');
       addSystemMessage('  1-9 - Open peer tab for numbered peer');
-      addSystemMessage('  /group <peer1,peer2,...> - Create/switch group tab');
+      addSystemMessage('  /group <peer1 peer2 ...> - Create/switch group tab (comma or space separated)');
       addSystemMessage('  @peer message - Send to one peer');
       addSystemMessage('  /peers - List online peers with full IDs');
       addSystemMessage('  /clear - Clear message history');
