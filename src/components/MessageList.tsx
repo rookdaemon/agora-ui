@@ -6,9 +6,10 @@ interface MessageListProps {
   messages: Message[];
   myPublicKey: string;
   myDisplayName: string;
+  hasMoreMessages?: boolean;
 }
 
-export function MessageList({ messages, myPublicKey, myDisplayName }: MessageListProps): JSX.Element {
+export function MessageList({ messages, myPublicKey, myDisplayName, hasMoreMessages = false }: MessageListProps): JSX.Element {
   const { stdout } = useStdout();
   // Reserve rows for header (~3), border (~2), input (~3), footer (~2)
   const reservedRows = 10;
@@ -33,6 +34,9 @@ export function MessageList({ messages, myPublicKey, myDisplayName }: MessageLis
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1} minHeight={10}>
+      {hasMoreMessages && (
+        <Text dimColor>↑ PgUp: load older messages</Text>
+      )}
       {visibleMessages.length === 0 ? (
         <Text dimColor>No messages yet. Type a message and press Enter to send.</Text>
       ) : (

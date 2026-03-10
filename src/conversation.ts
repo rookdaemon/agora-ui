@@ -5,6 +5,7 @@ import type { PeerReferenceDirectory } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
 export const MAX_CONVERSATION_BYTES = 4096;
+export const LOAD_MORE_PAGE_SIZE = 20;
 
 /**
  * Returns the path to the CONVERSATION.md file.

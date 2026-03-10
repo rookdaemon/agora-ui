@@ -9,7 +9,7 @@ import { Input } from './components/Input.js';
 import { Tabs } from './components/Tabs.js';
 import type { TabItem } from './components/Tabs.js';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
-import { appendToConversation, loadConversation, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES } from './conversation.js';
+import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, LOAD_MORE_PAGE_SIZE } from './conversation.js';
 import { appendToSent, loadSent } from './sent.js';
 import type { Message, ConnectionStatus } from './types.js';
 
@@ -50,6 +50,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   const [sentHistory, setSentHistory] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<string>('inbox');
   const [groupTabs, setGroupTabs] = useState<Map<string, GroupTab>>(new Map());
+  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(false);
   const relayRef = useRef<RelayClient | null>(null);
 
   const messages = useMemo(
@@ -75,6 +76,21 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
 
   const addSystemMessage = (text: string): void => {
     setSystemMessages((prev) => [...prev, { from: 'system', text, timestamp: Date.now() }]);
+  };
+
+  const loadMoreMessages = (): void => {
+    const oldest = chatMessages.reduce<Message | null>(
+      (min, m) => m.from !== 'system' && (min === null || m.timestamp < min.timestamp) ? m : min,
+      null
+    );
+    const beforeTimestamp = oldest ? oldest.timestamp : Date.now();
+    const older = loadOlderMessages(beforeTimestamp, LOAD_MORE_PAGE_SIZE, conversationPath, configPeers);
+    if (older.length === 0) {
+      setHasMoreMessages(false);
+      addSystemMessage('No older messages to load');
+      return;
+    }
+    setChatMessages((prev) => [...older, ...prev]);
   };
 
   const resolvePeerRef = (ref: string): string | undefined => {
@@ -116,6 +132,11 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   };
 
   useInput((input, key) => {
+    if (key.pageUp) {
+      loadMoreMessages();
+      return;
+    }
+
     if (key.tab && tabs.length > 1) {
       const ids = tabs.map((t) => t.id);
       const next = (ids.indexOf(activeTab) + 1) % ids.length;
@@ -136,6 +157,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   useEffect(() => {
     const loaded = loadConversation(conversationPath, configPeers);
     setChatMessages(loaded);
+    setHasMoreMessages(loaded.length > 0);
     for (const msg of loaded) {
       if (msg.to && msg.to.length > 0) {
         ensureGroupTab(msg.to);
@@ -255,6 +277,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       addSystemMessage('  /help - Show this help');
       addSystemMessage('  /quit - Exit the chat');
       addSystemMessage('  Tab - Switch tabs');
+      addSystemMessage('  PgUp - Load older messages');
       return true;
     }
 
@@ -372,7 +395,7 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       />
       <Tabs tabs={tabs} activeTab={activeTab} />
       <Box marginY={1}>
-        <MessageList messages={tabMessages} myPublicKey={publicKey} myDisplayName={formatDisplayName(broadcastName, publicKey)} />
+        <MessageList messages={tabMessages} myPublicKey={publicKey} myDisplayName={formatDisplayName(broadcastName, publicKey)} hasMoreMessages={hasMoreMessages} />
       </Box>
       <Input
         value={inputValue}
