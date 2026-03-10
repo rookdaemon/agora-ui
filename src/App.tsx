@@ -84,13 +84,14 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
       null
     );
     const beforeTimestamp = oldest ? oldest.timestamp : Date.now();
-    const older = loadOlderMessages(beforeTimestamp, LOAD_MORE_PAGE_SIZE, conversationPath, configPeers);
+    const { messages: older, hasMore: moreExist } = loadOlderMessages(beforeTimestamp, LOAD_MORE_PAGE_SIZE, conversationPath, configPeers);
     if (older.length === 0) {
       setHasMoreMessages(false);
       addSystemMessage('No older messages to load');
       return;
     }
     setChatMessages((prev) => [...older, ...prev]);
+    setHasMoreMessages(moreExist);
   };
 
   const resolvePeerRef = (ref: string): string | undefined => {

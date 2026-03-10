@@ -120,11 +120,12 @@ export function loadConversation(filePath?: string, directory?: PeerReferenceDir
 /**
  * Loads older messages before a given timestamp.
  * Returns up to maxMessages older messages, useful for pagination.
+ * hasMore is true when there are even older messages not included.
  */
-export function loadOlderMessages(beforeTimestamp: number, maxMessages: number, filePath?: string, directory?: PeerReferenceDirectory): Message[] {
+export function loadOlderMessages(beforeTimestamp: number, maxMessages: number, filePath?: string, directory?: PeerReferenceDirectory): { messages: Message[]; hasMore: boolean } {
   const path = filePath ?? getConversationPath();
 
-  if (!existsSync(path)) return [];
+  if (!existsSync(path)) return { messages: [], hasMore: false };
 
   const content = readFileSync(path, 'utf-8');
   const lines = content.split('\n').filter(l => l.length > 0);
@@ -133,6 +134,8 @@ export function loadOlderMessages(beforeTimestamp: number, maxMessages: number, 
   const allMessages = lines.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
   const olderMessages = allMessages.filter(msg => msg.timestamp < beforeTimestamp);
 
-  // Return the most recent maxMessages from the filtered set
-  return olderMessages.slice(-maxMessages);
+  return {
+    messages: olderMessages.slice(-maxMessages),
+    hasMore: olderMessages.length > maxMessages,
+  };
 }

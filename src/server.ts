@@ -7,7 +7,7 @@ import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, getSeenKeysPath, IgnoredPeersManager, SeenKeyStore } from '@rookdaemon/agora';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { resolveRecipientReference, resolveRecipientReferences } from './recipient-resolution.js';
-import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, getConversationPath } from './conversation.js';
+import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, LOAD_MORE_PAGE_SIZE, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
@@ -145,6 +145,9 @@ const HTML = `<!DOCTYPE html>
     .tab-toggle-active { color: #f85149; }
     .messages { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
     .messages-empty { color: #484f58; font-style: italic; font-size: 0.88rem; margin: auto; }
+    .load-more-wrap { display: flex; justify-content: center; padding: 4px 0 6px; }
+    .load-more { background: none; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; font-size: 0.8rem; cursor: pointer; padding: 3px 12px; }
+    .load-more:hover { border-color: #8b949e; color: #c9d1d9; }
     .msg { font-size: 0.88rem; line-height: 1.5; padding: 1px 0; display: flex; gap: 8px; }
     .msg-time { color: #484f58; flex-shrink: 0; }
     .msg-body { flex: 1; word-break: break-word; }
@@ -269,6 +272,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('inbox');
   const [tabsById, setTabsById] = useState({});
   const [ignoredPeers, setIgnoredPeers] = useState([]);
+  const [hasMore, setHasMore] = useState(false);
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
@@ -324,6 +328,11 @@ function App() {
         if (data.publicKey) setSelfKey(data.publicKey);
       } else if (data.type === 'ignored_peers') {
         setIgnoredPeers(data.peers || []);
+      } else if (data.type === 'has_more') {
+        setHasMore(data.value);
+      } else if (data.type === 'older_messages') {
+        setMessages(prev => [...data.messages, ...prev]);
+        setHasMore(data.hasMore);
       } else if (data.type === 'clear') {
         setMessages([]);
       }
@@ -550,6 +559,17 @@ function App() {
         </div>
       )}
       <div className="messages">
+        {hasMore && (
+          <div className="load-more-wrap">
+            <button className="load-more" onClick={() => {
+              const ws = wsRef.current;
+              if (!ws || ws.readyState !== WebSocket.OPEN) return;
+              const realMsgs = messages.filter(m => m.from !== 'system' && !m.tabSeed);
+              const oldest = realMsgs.reduce((min, m) => m.timestamp < min ? m.timestamp : min, Date.now());
+              ws.send(JSON.stringify({ type: 'load_more', beforeTimestamp: oldest }));
+            }}>↑ Load older messages</button>
+          </div>
+        )}
         {visibleMessages.length === 0
           ? <div className="messages-empty">No messages yet. Type a message and press Enter to send.</div>
           : visibleMessages.map((msg, i) => (
@@ -606,7 +626,7 @@ export function startWebServer(options: WebServerOptions): void {
     },
   };
 
-  const { messages }: { messages: Message[] } = loadConversation(conversationPath, configPeersWithSelf);
+  const { messages, hasMore: initialHasMore } = loadConversation(conversationPath, configPeersWithSelf);
   const peers = new Map<string, string>();
   const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
   const seenKeyStore = seenKeysPath ? new SeenKeyStore(seenKeysPath) : null;
@@ -759,11 +779,12 @@ export function startWebServer(options: WebServerOptions): void {
     for (const msg of messages) {
       ws.send(JSON.stringify({ type: 'message', ...msg }));
     }
+    ws.send(JSON.stringify({ type: 'has_more', value: initialHasMore }));
 
     ws.on('message', (raw) => {
-      let parsed: { type?: string; text?: string; peerKey?: string; recipients?: string[] };
+      let parsed: { type?: string; text?: string; peerKey?: string; recipients?: string[]; beforeTimestamp?: number };
       try {
-        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string; peerKey?: string; recipients?: string[] };
+        parsed = JSON.parse(raw.toString()) as { type?: string; text?: string; peerKey?: string; recipients?: string[]; beforeTimestamp?: number };
       } catch {
         return;
       }
@@ -799,6 +820,9 @@ export function startWebServer(options: WebServerOptions): void {
           timestamp: Date.now(),
         }));
         broadcastIgnoredPeers();
+      } else if (parsed.type === 'load_more' && typeof parsed.beforeTimestamp === 'number') {
+        const { messages: older, hasMore } = loadOlderMessages(parsed.beforeTimestamp, LOAD_MORE_PAGE_SIZE, conversationPath, configPeersWithSelf);
+        ws.send(JSON.stringify({ type: 'older_messages', messages: older, hasMore }));
       }
     });
   });
