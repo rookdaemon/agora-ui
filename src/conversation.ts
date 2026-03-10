@@ -53,17 +53,27 @@ export function parseMessageLine(line: string, directory?: PeerReferenceDirector
 }
 
 /**
- * Trims lines from the front, removing 2 at a time (even-message boundary),
- * until the total byte size of the joined content fits within maxBytes.
+ * Returns the largest suffix of lines whose serialised byte size
+ * (lines joined with '\n' plus a trailing '\n') fits within maxBytes,
+ * trimmed to an even count for clean message-pair boundaries.
+ *
+ * O(n) — walks backwards accumulating byte counts instead of repeatedly
+ * joining the entire array.
  */
 export function trimToByteLimit(lines: string[], maxBytes: number): string[] {
-  let result = [...lines];
-  while (result.length > 0) {
-    const size = Buffer.byteLength(result.join('\n') + '\n', 'utf-8');
-    if (size <= maxBytes) break;
-    // Remove 2 lines at a time (even-message cut)
-    const removeCount = Math.min(2, result.length);
-    result = result.slice(removeCount);
+  // Each line contributes byteLength(line) + 1 byte for the '\n' separator/terminator.
+  let totalBytes = 0;
+  let startIdx = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const lineBytes = Buffer.byteLength(lines[i], 'utf-8') + 1;
+    if (totalBytes + lineBytes > maxBytes) break;
+    totalBytes += lineBytes;
+    startIdx = i;
+  }
+  const result = lines.slice(startIdx);
+  // Trim to an even count only when trimming actually occurred (even-message boundary).
+  if (startIdx > 0 && result.length % 2 !== 0) {
+    return result.slice(1);
   }
   return result;
 }
