@@ -90,17 +90,21 @@ export function appendToConversation(msg: Message, filePath?: string, directory?
  * Loads messages from CONVERSATION.md, returning only the most recent
  * messages that fit within MAX_CONVERSATION_BYTES (trimmed at even-message
  * boundaries). Full history is preserved on disk.
+ *
+ * Returns `{ messages, hasMore }` where `hasMore` is true when the file
+ * contains older messages that were not loaded.
  */
-export function loadConversation(filePath?: string, directory?: PeerReferenceDirectory): Message[] {
+export function loadConversation(filePath?: string, directory?: PeerReferenceDirectory): { messages: Message[]; hasMore: boolean } {
   const path = filePath ?? getConversationPath();
 
-  if (!existsSync(path)) return [];
+  if (!existsSync(path)) return { messages: [], hasMore: false };
 
   const content = readFileSync(path, 'utf-8');
   const lines = content.split('\n').filter(l => l.length > 0);
   const trimmed = trimToByteLimit(lines, MAX_CONVERSATION_BYTES);
+  const messages = trimmed.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
 
-  return trimmed.map(line => parseMessageLine(line, directory)).filter((m): m is Message => m !== null);
+  return { messages, hasMore: lines.length > trimmed.length };
 }
 
 /**

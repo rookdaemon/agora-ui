@@ -606,7 +606,7 @@ export function startWebServer(options: WebServerOptions): void {
     },
   };
 
-  const messages: Message[] = loadConversation(conversationPath, configPeersWithSelf);
+  const { messages }: { messages: Message[] } = loadConversation(conversationPath, configPeersWithSelf);
   const peers = new Map<string, string>();
   const ignoredPeersManager = new IgnoredPeersManager(ignoredPath);
   const seenKeyStore = seenKeysPath ? new SeenKeyStore(seenKeysPath) : null;

@@ -210,9 +210,10 @@ describe('loadConversation', () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true });
   });
 
-  it('returns empty array if file does not exist', () => {
+  it('returns empty messages and hasMore=false if file does not exist', () => {
     const result = loadConversation(TEST_FILE);
-    expect(result).toEqual([]);
+    expect(result.messages).toEqual([]);
+    expect(result.hasMore).toBe(false);
   });
 
   it('parses messages from file', () => {
@@ -220,12 +221,12 @@ describe('loadConversation', () => {
       '[2023-11-14T22:13:20.000Z] **FROM:** alice@99990000 **TO:** bob@ffff1234 Hello\n' +
       '[2023-11-14T22:13:21.000Z] **FROM:** bob@ffff1234 **TO:** alice@99990000 Hi\n'
     );
-    const result = loadConversation(TEST_FILE, DIRECTORY);
-    expect(result).toHaveLength(2);
-    expect(result[0].from).toBe('alice@99990000');
-    expect(result[0].to).toEqual([BOB_KEY]);
-    expect(result[1].from).toBe('bob@ffff1234');
-    expect(result[1].to).toEqual([ALICE_KEY]);
+    const { messages } = loadConversation(TEST_FILE, DIRECTORY);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].from).toBe('alice@99990000');
+    expect(messages[0].to).toEqual([BOB_KEY]);
+    expect(messages[1].from).toBe('bob@ffff1234');
+    expect(messages[1].to).toEqual([ALICE_KEY]);
   });
 
   it('skips invalid lines without failing', () => {
@@ -234,8 +235,8 @@ describe('loadConversation', () => {
       'invalid line\n' +
       '[2023-11-14T22:13:21.000Z] **FROM:** bob@ffff1234 **TO:** alice@99990000 Hi\n'
     );
-    const result = loadConversation(TEST_FILE, DIRECTORY);
-    expect(result).toHaveLength(2);
+    const { messages } = loadConversation(TEST_FILE, DIRECTORY);
+    expect(messages).toHaveLength(2);
   });
 
   it('skips old-format lines', () => {
@@ -243,43 +244,58 @@ describe('loadConversation', () => {
       '[2023-11-14T22:13:20.000Z] [Alice] old format\n' +
       '[2023-11-14T22:13:21.000Z] **FROM:** bob@ffff1234 **TO:** alice@99990000 new format\n'
     );
-    const result = loadConversation(TEST_FILE, DIRECTORY);
-    expect(result).toHaveLength(1);
-    expect(result[0].from).toBe('bob@ffff1234');
+    const { messages } = loadConversation(TEST_FILE, DIRECTORY);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].from).toBe('bob@ffff1234');
   });
 
   it('roundtrips through append and load', () => {
-    const messages: Message[] = [
+    const msgs: Message[] = [
       makeMessage('alice@99990000', 'Hello', 1700000000000, [BOB_KEY]),
       makeMessage('bob@ffff1234', 'Hi there', 1700000001000, [ALICE_KEY]),
     ];
-    messages.forEach(m => appendToConversation(m, TEST_FILE, DIRECTORY));
-    const loaded = loadConversation(TEST_FILE, DIRECTORY);
-    expect(loaded).toHaveLength(2);
-    expect(loaded[0].from).toBe('alice@99990000');
-    expect(loaded[0].text).toBe('Hello');
-    expect(loaded[0].to).toEqual([BOB_KEY]);
-    expect(loaded[1].from).toBe('bob@ffff1234');
-    expect(loaded[1].text).toBe('Hi there');
-    expect(loaded[1].to).toEqual([ALICE_KEY]);
+    msgs.forEach(m => appendToConversation(m, TEST_FILE, DIRECTORY));
+    const { messages } = loadConversation(TEST_FILE, DIRECTORY);
+    expect(messages).toHaveLength(2);
+    expect(messages[0].from).toBe('alice@99990000');
+    expect(messages[0].text).toBe('Hello');
+    expect(messages[0].to).toEqual([BOB_KEY]);
+    expect(messages[1].from).toBe('bob@ffff1234');
+    expect(messages[1].text).toBe('Hi there');
+    expect(messages[1].to).toEqual([ALICE_KEY]);
   });
 
   it('returns only the most recent messages within MAX_CONVERSATION_BYTES', () => {
     for (let i = 0; i < 200; i++) {
       appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
     }
-    const loaded = loadConversation(TEST_FILE);
-    const serialized = loaded.map(m => formatMessageLine(m)).join('\n') + '\n';
+    const { messages } = loadConversation(TEST_FILE);
+    const serialized = messages.map(m => formatMessageLine(m)).join('\n') + '\n';
     expect(Buffer.byteLength(serialized, 'utf-8')).toBeLessThanOrEqual(MAX_CONVERSATION_BYTES);
-    expect(loaded[loaded.length - 1].text).toBe('message 199');
-    expect(loaded.find(m => m.text === 'message 0')).toBeUndefined();
+    expect(messages[messages.length - 1].text).toBe('message 199');
+    expect(messages.find(m => m.text === 'message 0')).toBeUndefined();
   });
 
   it('loads messages trimmed at even boundaries', () => {
     for (let i = 0; i < 200; i++) {
       appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
     }
-    const loaded = loadConversation(TEST_FILE);
-    expect(loaded.length % 2).toBe(0);
+    const { messages } = loadConversation(TEST_FILE);
+    expect(messages.length % 2).toBe(0);
+  });
+
+  it('hasMore is false when all messages fit within MAX_CONVERSATION_BYTES', () => {
+    appendToConversation(makeMessage('alice@99990000', 'Hello', 1700000000000, [BOB_KEY]), TEST_FILE, DIRECTORY);
+    appendToConversation(makeMessage('bob@ffff1234', 'Hi', 1700000001000, [ALICE_KEY]), TEST_FILE, DIRECTORY);
+    const { hasMore } = loadConversation(TEST_FILE, DIRECTORY);
+    expect(hasMore).toBe(false);
+  });
+
+  it('hasMore is true when there are older messages beyond MAX_CONVERSATION_BYTES', () => {
+    for (let i = 0; i < 200; i++) {
+      appendToConversation(makeMessage('User', `message ${i}`, 1700000000000 + i * 1000), TEST_FILE);
+    }
+    const { hasMore } = loadConversation(TEST_FILE);
+    expect(hasMore).toBe(true);
   });
 });

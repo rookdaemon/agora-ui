@@ -155,9 +155,9 @@ export function App({ relayUrl, publicKey, privateKey, username, broadcastName, 
   });
 
   useEffect(() => {
-    const loaded = loadConversation(conversationPath, configPeers);
+    const { messages: loaded, hasMore } = loadConversation(conversationPath, configPeers);
     setChatMessages(loaded);
-    setHasMoreMessages(loaded.length > 0);
+    setHasMoreMessages(hasMore);
     for (const msg of loaded) {
       if (msg.to && msg.to.length > 0) {
         ensureGroupTab(msg.to);
