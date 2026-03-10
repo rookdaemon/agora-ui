@@ -145,8 +145,8 @@ const HTML = `<!DOCTYPE html>
     .tab-toggle-active { color: #f85149; }
     .messages { flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; min-height: 0; }
     .messages-empty { color: #484f58; font-style: italic; font-size: 0.88rem; margin: auto; }
-    .load-more-wrap { display: flex; justify-content: center; padding: 4px 0 6px; }
-    .load-more { background: none; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; font-size: 0.8rem; cursor: pointer; padding: 3px 12px; }
+    .load-more-wrap { position: sticky; top: 0; display: flex; justify-content: center; padding: 4px 0 6px; z-index: 1; }
+    .load-more { background: #161b22; border: 1px solid #30363d; border-radius: 4px; color: #8b949e; font-size: 0.8rem; cursor: pointer; padding: 3px 12px; }
     .load-more:hover { border-color: #8b949e; color: #c9d1d9; }
     .new-msg-pill { position: sticky; bottom: 8px; align-self: center; background: #1f6feb; color: #fff; border: none; border-radius: 16px; padding: 5px 16px; font-size: 0.82rem; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.4); z-index: 2; }
     .new-msg-pill:hover { background: #388bfd; }
