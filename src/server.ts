@@ -287,73 +287,96 @@ function App() {
   const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
 
   useEffect(() => {
-    const ws = new WebSocket('ws://' + location.host);
-    wsRef.current = ws;
+    let attempts = 0;
+    let reconnectTimer = null;
+    let stopped = false;
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'status') {
-        setStatus(data.value);
-      } else if (data.type === 'message') {
-        setMessages(prev => [...prev, data]);
-        if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
-        const tabMeta = computeMessageTab(data);
-        if (tabMeta) ensureTab(tabMeta);
-      } else if (data.type === 'system') {
-        setMessages(prev => [...prev, { ...data, from: 'system' }]);
-      } else if (data.type === 'group_tab') {
-        if (data.recipients && data.recipients.length > 0) {
-          // Route /group through the same participant-to-tab derivation path as normal messages.
-          const seed = {
-            from: '__group_seed__',
-            fromKey: selfKey,
-            text: '',
-            timestamp: Date.now(),
-            to: data.recipients,
-            tabSeed: true,
-          };
-          setMessages(prev => [...prev, seed]);
-          if (selfKey) {
-            const tabMeta = computeMessageTab(seed);
-            if (tabMeta) {
-              ensureTab(tabMeta);
-              setActiveTab(tabMeta.id);
+    function connect() {
+      const ws = new WebSocket('ws://' + location.host);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status') {
+          setStatus(data.value);
+        } else if (data.type === 'message') {
+          setMessages(prev => [...prev, data]);
+          if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
+          const tabMeta = computeMessageTab(data);
+          if (tabMeta) ensureTab(tabMeta);
+        } else if (data.type === 'system') {
+          setMessages(prev => [...prev, { ...data, from: 'system' }]);
+        } else if (data.type === 'group_tab') {
+          if (data.recipients && data.recipients.length > 0) {
+            // Route /group through the same participant-to-tab derivation path as normal messages.
+            const seed = {
+              from: '__group_seed__',
+              fromKey: selfKey,
+              text: '',
+              timestamp: Date.now(),
+              to: data.recipients,
+              tabSeed: true,
+            };
+            setMessages(prev => [...prev, seed]);
+            if (selfKey) {
+              const tabMeta = computeMessageTab(seed);
+              if (tabMeta) {
+                ensureTab(tabMeta);
+                setActiveTab(tabMeta.id);
+              }
+            } else {
+              // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
+              pendingGroupRecipientsRef.current = data.recipients;
             }
           } else {
-            // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
-            pendingGroupRecipientsRef.current = data.recipients;
+            setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
           }
-        } else {
-          setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
+        } else if (data.type === 'config_peers') {
+          setConfigPeers(data.peers || {});
+        } else if (data.type === 'peers') {
+          setPeers(data.peers);
+        } else if (data.type === 'info') {
+          setUsername(data.username);
+          if (data.publicKey) setSelfKey(data.publicKey);
+        } else if (data.type === 'ignored_peers') {
+          setIgnoredPeers(data.peers || []);
+        } else if (data.type === 'has_more') {
+          setHasMore(data.value);
+        } else if (data.type === 'older_messages') {
+          // Anchor: remember the first currently-visible message element
+          const container = messagesRef.current;
+          if (container) {
+            const firstMsg = container.querySelector('.msg');
+            if (firstMsg) anchorRef.current = firstMsg;
+          }
+          setMessages(prev => [...data.messages, ...prev]);
+          setHasMore(data.hasMore);
+        } else if (data.type === 'clear') {
+          setMessages([]);
         }
-      } else if (data.type === 'config_peers') {
-        setConfigPeers(data.peers || {});
-      } else if (data.type === 'peers') {
-        setPeers(data.peers);
-      } else if (data.type === 'info') {
-        setUsername(data.username);
-        if (data.publicKey) setSelfKey(data.publicKey);
-      } else if (data.type === 'ignored_peers') {
-        setIgnoredPeers(data.peers || []);
-      } else if (data.type === 'has_more') {
-        setHasMore(data.value);
-      } else if (data.type === 'older_messages') {
-        // Anchor: remember the first currently-visible message element
-        const container = messagesRef.current;
-        if (container) {
-          const firstMsg = container.querySelector('.msg');
-          if (firstMsg) anchorRef.current = firstMsg;
+      };
+
+      ws.onopen = () => { attempts = 0; };
+
+      ws.onclose = () => {
+        setStatus('disconnected');
+        wsRef.current = null;
+        if (!stopped) {
+          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+          attempts++;
+          setStatus('connecting');
+          reconnectTimer = setTimeout(connect, delay);
         }
-        setMessages(prev => [...data.messages, ...prev]);
-        setHasMore(data.hasMore);
-      } else if (data.type === 'clear') {
-        setMessages([]);
-      }
+      };
+    }
+
+    connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (wsRef.current) wsRef.current.close();
     };
-
-    ws.onclose = () => setStatus('disconnected');
-
-    return () => ws.close();
   }, []);
 
   useEffect(() => {
