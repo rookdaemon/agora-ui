@@ -287,7 +287,7 @@ function App() {
   const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
 
   useEffect(() => {
-    const ws = new WebSocket('ws://' + location.host);
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -655,7 +655,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 export function startWebServer(options: WebServerOptions): void {
   const {
     relayUrl, publicKey, privateKey, username, broadcastName,
-    configPeers, conversationPath, sentPath, ignoredPath, seenKeysPath, port = 3000,
+    configPeers, conversationPath, sentPath, ignoredPath, seenKeysPath, port = 1337,
     security,
   } = options;
 
