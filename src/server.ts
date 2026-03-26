@@ -12,6 +12,7 @@ import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
 import { InboundMessageGuard } from './security.js';
+import { findUnknownPeers, addPeerToConfig } from './peer-suggestions.js';
 
 export interface WebServerOptions {
   relayUrl: string;
@@ -20,6 +21,7 @@ export interface WebServerOptions {
   username: string;
   broadcastName?: string;
   configPeers: Record<string, AgoraPeerConfig>;
+  configPath?: string;
   conversationPath?: string;
   sentPath?: string;
   ignoredPath?: string;
@@ -168,6 +170,17 @@ const HTML = `<!DOCTYPE html>
     .footer { text-align: center; color: #484f58; font-size: 0.76rem; padding: 2px 0; }
     .footer a { color: #484f58; text-decoration: none; }
     .footer a:hover { color: #8b949e; }
+    .suggestions { display: flex; flex-direction: column; gap: 6px; }
+    .suggestion { background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.84rem; }
+    .suggestion-text { color: #8b949e; flex: 1; }
+    .suggestion-text strong { color: #d29922; }
+    .suggestion-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .suggestion-btn { background: #21262d; border: 1px solid #30363d; border-radius: 4px; color: #c9d1d9; padding: 3px 12px; cursor: pointer; font-family: inherit; font-size: 0.78rem; transition: background 0.15s, border-color 0.15s; }
+    .suggestion-btn:hover { background: #30363d; border-color: #8b949e; }
+    .suggestion-btn-yes { border-color: #3fb950; color: #3fb950; }
+    .suggestion-btn-yes:hover { background: #1a4731; border-color: #3fb950; }
+    .suggestion-btn-no { border-color: #f85149; color: #f85149; }
+    .suggestion-btn-no:hover { background: #3d1515; border-color: #f85149; }
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
@@ -276,6 +289,7 @@ function App() {
   const [ignoredPeers, setIgnoredPeers] = useState([]);
   const [hasMore, setHasMore] = useState(false);
   const [newMsgCount, setNewMsgCount] = useState(0);
+  const [peerSuggestions, setPeerSuggestions] = useState([]);
   const draftRef = useRef('');
   const wsRef = useRef(null);
   const bottomRef = useRef(null);
@@ -287,73 +301,103 @@ function App() {
   const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
 
   useEffect(() => {
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
-    wsRef.current = ws;
+    let attempts = 0;
+    let reconnectTimer = null;
+    let stopped = false;
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === 'status') {
-        setStatus(data.value);
-      } else if (data.type === 'message') {
-        setMessages(prev => [...prev, data]);
-        if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
-        const tabMeta = computeMessageTab(data);
-        if (tabMeta) ensureTab(tabMeta);
-      } else if (data.type === 'system') {
-        setMessages(prev => [...prev, { ...data, from: 'system' }]);
-      } else if (data.type === 'group_tab') {
-        if (data.recipients && data.recipients.length > 0) {
-          // Route /group through the same participant-to-tab derivation path as normal messages.
-          const seed = {
-            from: '__group_seed__',
-            fromKey: selfKey,
-            text: '',
-            timestamp: Date.now(),
-            to: data.recipients,
-            tabSeed: true,
-          };
-          setMessages(prev => [...prev, seed]);
-          if (selfKey) {
-            const tabMeta = computeMessageTab(seed);
-            if (tabMeta) {
-              ensureTab(tabMeta);
-              setActiveTab(tabMeta.id);
+    function connect() {
+      const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
+      wsRef.current = ws;
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'status') {
+          setStatus(data.value);
+        } else if (data.type === 'message') {
+          setMessages(prev => [...prev, data]);
+          if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
+          const tabMeta = computeMessageTab(data);
+          if (tabMeta) ensureTab(tabMeta);
+        } else if (data.type === 'system') {
+          setMessages(prev => [...prev, { ...data, from: 'system' }]);
+        } else if (data.type === 'group_tab') {
+          if (data.recipients && data.recipients.length > 0) {
+            // Route /group through the same participant-to-tab derivation path as normal messages.
+            const seed = {
+              from: '__group_seed__',
+              fromKey: selfKey,
+              text: '',
+              timestamp: Date.now(),
+              to: data.recipients,
+              tabSeed: true,
+            };
+            setMessages(prev => [...prev, seed]);
+            if (selfKey) {
+              const tabMeta = computeMessageTab(seed);
+              if (tabMeta) {
+                ensureTab(tabMeta);
+                setActiveTab(tabMeta.id);
+              }
+            } else {
+              // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
+              pendingGroupRecipientsRef.current = data.recipients;
             }
           } else {
-            // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
-            pendingGroupRecipientsRef.current = data.recipients;
+            setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
           }
-        } else {
-          setMessages(prev => [...prev, { from: 'system', text: data.error || 'No valid recipients for /group', timestamp: Date.now() }]);
+        } else if (data.type === 'config_peers') {
+          setConfigPeers(data.peers || {});
+        } else if (data.type === 'peers') {
+          setPeers(data.peers);
+        } else if (data.type === 'info') {
+          setUsername(data.username);
+          if (data.publicKey) setSelfKey(data.publicKey);
+        } else if (data.type === 'ignored_peers') {
+          setIgnoredPeers(data.peers || []);
+        } else if (data.type === 'has_more') {
+          setHasMore(data.value);
+        } else if (data.type === 'older_messages') {
+          // Anchor: remember the first currently-visible message element
+          const container = messagesRef.current;
+          if (container) {
+            const firstMsg = container.querySelector('.msg');
+            if (firstMsg) anchorRef.current = firstMsg;
+          }
+          setMessages(prev => [...data.messages, ...prev]);
+          setHasMore(data.hasMore);
+        } else if (data.type === 'peer_suggestion') {
+          setPeerSuggestions(prev => {
+            if (prev.some(s => s.peerKey === data.peerKey)) return prev;
+            return [...prev, { peerKey: data.peerKey, displayName: data.displayName }];
+          });
+        } else if (data.type === 'dismiss_peer_suggestion') {
+          setPeerSuggestions(prev => prev.filter(s => s.peerKey !== data.peerKey));
+        } else if (data.type === 'clear') {
+          setMessages([]);
         }
-      } else if (data.type === 'config_peers') {
-        setConfigPeers(data.peers || {});
-      } else if (data.type === 'peers') {
-        setPeers(data.peers);
-      } else if (data.type === 'info') {
-        setUsername(data.username);
-        if (data.publicKey) setSelfKey(data.publicKey);
-      } else if (data.type === 'ignored_peers') {
-        setIgnoredPeers(data.peers || []);
-      } else if (data.type === 'has_more') {
-        setHasMore(data.value);
-      } else if (data.type === 'older_messages') {
-        // Anchor: remember the first currently-visible message element
-        const container = messagesRef.current;
-        if (container) {
-          const firstMsg = container.querySelector('.msg');
-          if (firstMsg) anchorRef.current = firstMsg;
+      };
+
+      ws.onopen = () => { attempts = 0; };
+
+      ws.onclose = () => {
+        setStatus('disconnected');
+        wsRef.current = null;
+        if (!stopped) {
+          const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
+          attempts++;
+          setStatus('connecting');
+          reconnectTimer = setTimeout(connect, delay);
         }
-        setMessages(prev => [...data.messages, ...prev]);
-        setHasMore(data.hasMore);
-      } else if (data.type === 'clear') {
-        setMessages([]);
-      }
+      };
+    }
+
+    connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (wsRef.current) wsRef.current.close();
     };
-
-    ws.onclose = () => setStatus('disconnected');
-
-    return () => ws.close();
   }, []);
 
   useEffect(() => {
@@ -516,6 +560,27 @@ function App() {
     }
   };
 
+  const acceptPeerSuggestion = (peerKey, displayName) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Parse name from display format "name@shortkey" or "@shortkey"
+    let peerName = undefined;
+    if (displayName && !displayName.startsWith('@')) {
+      const atIdx = displayName.lastIndexOf('@');
+      if (atIdx > 0) peerName = displayName.slice(0, atIdx).trim();
+      else peerName = displayName;
+    }
+    ws.send(JSON.stringify({ type: 'add_peer', peerKey, peerName }));
+    setPeerSuggestions(prev => prev.filter(s => s.peerKey !== peerKey));
+  };
+
+  const dismissPeerSuggestion = (peerKey) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'dismiss_peer_suggestion', peerKey }));
+    setPeerSuggestions(prev => prev.filter(s => s.peerKey !== peerKey));
+  };
+
   const sendMessage = () => {
     const text = input.trim();
     if (!text) return;
@@ -629,6 +694,20 @@ function App() {
           }}>↓ {newMsgCount} new message{newMsgCount > 1 ? 's' : ''}</button>
         )}
       </div>
+      {peerSuggestions.length > 0 && (
+        <div className="suggestions">
+          {peerSuggestions.map(s => (
+            <div key={s.peerKey} className="suggestion">
+              <span className="suggestion-text">Add <strong>{s.displayName}</strong> to your peers?</span>
+              <span className="suggestion-actions">
+                <button className="suggestion-btn suggestion-btn-yes" onClick={() => acceptPeerSuggestion(s.peerKey, s.displayName)}>Yes</button>
+                <button className="suggestion-btn suggestion-btn-no" onClick={() => dismissPeerSuggestion(s.peerKey)}>No</button>
+                <button className="suggestion-btn" onClick={() => dismissPeerSuggestion(s.peerKey)}>Ignore</button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="input-row">
         <textarea
           rows={4}
@@ -655,7 +734,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 export function startWebServer(options: WebServerOptions): void {
   const {
     relayUrl, publicKey, privateKey, username, broadcastName,
-    configPeers, conversationPath, sentPath, ignoredPath, seenKeysPath, port = 1337,
+    configPeers, configPath, conversationPath, sentPath, ignoredPath, seenKeysPath, port = 1337,
     security,
   } = options;
 
@@ -680,6 +759,20 @@ export function startWebServer(options: WebServerOptions): void {
   const guard = new InboundMessageGuard({ ...security, ignoredPeers: ignoredPeersManager.listIgnoredPeers() });
   let relayStatus: 'connecting' | 'connected' | 'disconnected' = 'connecting';
   const ownDisplayName = formatDisplayName(localName, publicKey);
+
+  // Track peers already suggested or dismissed this session to avoid repeated prompts.
+  const suggestedPeerKeys = new Set<string>();
+
+  const suggestUnknownPeers = (recipients: string[]): void => {
+    if (!configPath) return;
+    const unknown = findUnknownPeers(recipients, configPeersWithSelf, publicKey);
+    for (const key of unknown) {
+      if (suggestedPeerKeys.has(key)) continue;
+      suggestedPeerKeys.add(key);
+      const displayName = peers.get(key) ?? ('@' + key.slice(-8));
+      broadcastToClients({ type: 'peer_suggestion', peerKey: key, displayName, timestamp: Date.now() });
+    }
+  };
 
   console.error('[DEBUG] startWebServer:');
   console.error('[DEBUG]   publicKey:', publicKey.slice(-16));
@@ -773,6 +866,7 @@ export function startWebServer(options: WebServerOptions): void {
     }
     try { appendToConversation(msg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...msg });
+    suggestUnknownPeers([from]);
   });
 
   relay.on('peer_online', (peer: RelayPeer) => {
@@ -864,6 +958,26 @@ export function startWebServer(options: WebServerOptions): void {
           timestamp: Date.now(),
         }));
         broadcastIgnoredPeers();
+      } else if (parsed.type === 'add_peer' && parsed.peerKey) {
+        if (!configPath) {
+          ws.send(JSON.stringify({ type: 'system', text: 'Cannot add peer: no config path available', timestamp: Date.now() }));
+        } else {
+          const peerName = (parsed as { peerName?: string }).peerName;
+          const result = addPeerToConfig(configPath, parsed.peerKey, peerName);
+          if (result.ok) {
+            // Update in-memory configPeers
+            const entry = { publicKey: parsed.peerKey, name: peerName };
+            configPeersWithSelf[parsed.peerKey] = entry;
+            broadcastToClients({ type: 'config_peers', peers: configPeersWithSelf });
+            ws.send(JSON.stringify({ type: 'system', text: `Added peer ${peerName ?? parsed.peerKey.slice(-8)} to config`, timestamp: Date.now() }));
+          } else {
+            ws.send(JSON.stringify({ type: 'system', text: `Failed to add peer: ${result.error}`, timestamp: Date.now() }));
+          }
+        }
+        broadcastToClients({ type: 'dismiss_peer_suggestion', peerKey: parsed.peerKey });
+      } else if (parsed.type === 'dismiss_peer_suggestion' && parsed.peerKey) {
+        // No-op server-side; client removes the suggestion banner.
+        // Key already tracked in suggestedPeerKeys so it won't re-appear.
       } else if (parsed.type === 'load_more' && typeof parsed.beforeTimestamp === 'number') {
         const { messages: older, hasMore } = loadOlderMessages(parsed.beforeTimestamp, LOAD_MORE_PAGE_SIZE, conversationPath, configPeersWithSelf);
         ws.send(JSON.stringify({ type: 'older_messages', messages: older, hasMore }));
@@ -907,6 +1021,7 @@ export function startWebServer(options: WebServerOptions): void {
         messages.push(dmMsg);
         try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
+        suggestUnknownPeers([peerKey]);
       } else {
         broadcastToClients({ type: 'system', text: `Cannot send DM: ${resolved.reason}. Use /peers to list resolvable keys.`, timestamp: Date.now() });
       }
@@ -951,6 +1066,7 @@ export function startWebServer(options: WebServerOptions): void {
     messages.push(dmMsg);
     try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...dmMsg });
+    suggestUnknownPeers([targetPeerKey]);
   };
 
   const handleGroupSend = async (text: string, recipients: string[]): Promise<void> => {
@@ -998,6 +1114,7 @@ export function startWebServer(options: WebServerOptions): void {
     messages.push(groupMsg);
     try { appendToConversation(groupMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...groupMsg });
+    suggestUnknownPeers(uniqueRecipients);
   };
 
   const handleGroupResolve = (text: string, ws: WebSocket): void => {

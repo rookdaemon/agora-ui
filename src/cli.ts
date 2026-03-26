@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { startWebServer } from './server.js';
 import { loadConfig, getRelayUrl } from './config.js';
-import { resolveBroadcastName, formatDisplayName, shortKey } from '@rookdaemon/agora';
+import { resolveBroadcastName, formatDisplayName, shortKey, getDefaultConfigPath } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, getSeenKeysPath } from '@rookdaemon/agora';
 import { loadEnv } from './env.js';
 import { getConversationPath } from './conversation.js';
@@ -124,6 +124,8 @@ function main() {
       ignoredPeers: [...new Set([...(env.ignoredPeers ?? []), ...(cliArgs.ignoredPeers ?? [])])],
     };
 
+    const resolvedConfigPath = configPath ?? getDefaultConfigPath();
+
     startWebServer({
       relayUrl,
       publicKey: config.identity.publicKey,
@@ -131,6 +133,7 @@ function main() {
       username,
       broadcastName,
       configPeers: config.peers,
+      configPath: resolvedConfigPath,
       conversationPath,
       sentPath,
       ignoredPath,
