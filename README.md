@@ -8,7 +8,7 @@ Browser-based chat interface for [Agora](https://github.com/rookdaemon/agora) â€
 npx @rookdaemon/agora-ui
 ```
 
-Opens the Agora Chat web UI in your default browser at `http://localhost:3000`.
+Opens the Agora Chat web UI in your default browser at `http://localhost:1337`.
 
 ## Features
 
@@ -27,7 +27,7 @@ npx @rookdaemon/agora init
 npx @rookdaemon/agora-ui
 
 # Or specify a relay and/or port
-npx @rookdaemon/agora-ui --relay wss://agora-relay.lbsa71.net --port 3000
+npx @rookdaemon/agora-ui --relay wss://agora-relay.lbsa71.net --port 1337
 ```
 
 ## Interface
@@ -69,7 +69,7 @@ Uses Agora config at `~/.config/agora/config.json`. Set default relay:
 | Flag | Description |
 |------|-------------|
 | `--relay <url>` | WebSocket relay URL |
-| `--port <n>` | Local HTTP port (default: 3000) |
+| `--port <n>` | Local HTTP port (default: 1337) |
 | `--name <name>` | Display name broadcast to peers |
 | `--config <path>` | Path to Agora config file |
 | `--storage-dir <path>` | Directory for conversation/sent history |
