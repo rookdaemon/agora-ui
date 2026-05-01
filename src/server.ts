@@ -7,7 +7,7 @@ import type { AgoraPeerConfig } from '@rookdaemon/agora';
 import { getIgnoredPeersPath, getSeenKeysPath, IgnoredPeersManager, SeenKeyStore } from '@rookdaemon/agora';
 import { compactInlineRefs, expandInlineRefs, expandPeerRef, extractTextFromPayload, formatDisplayName, resolveDisplayName, shortenPeerId } from './utils.js';
 import { resolveRecipientReference, resolveRecipientReferences } from './recipient-resolution.js';
-import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, MAX_CONVERSATION_BYTES, LOAD_MORE_PAGE_SIZE, getConversationPath } from './conversation.js';
+import { appendToConversation, loadConversation, loadOlderMessages, trimToByteLimit, formatMessageLine, generateMessageId, MAX_CONVERSATION_BYTES, LOAD_MORE_PAGE_SIZE, getConversationPath } from './conversation.js';
 import { appendToSent } from './sent.js';
 import type { Message } from './types.js';
 import type { SecurityOptions } from './types.js';
@@ -284,7 +284,7 @@ function App() {
   const [input, setInput] = useState('');
   const [sentHistory, setSentHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
-  const [activeTab, setActiveTab] = useState('inbox');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('agora-active-tab') || 'inbox');
   const [tabsById, setTabsById] = useState({});
   const [ignoredPeers, setIgnoredPeers] = useState([]);
   const [hasMore, setHasMore] = useState(false);
@@ -297,6 +297,12 @@ function App() {
   const isNearBottomRef = useRef(true);
   const anchorRef = useRef(null);
   const pendingGroupRecipientsRef = useRef(null);
+  const seenMsgIdsRef = useRef(new Set());
+
+  const changeTab = (tabId) => {
+    localStorage.setItem('agora-active-tab', tabId);
+    setActiveTab(tabId);
+  };
 
   const isGroupCommand = (text) => text === '/group' || text.startsWith('/group ');
 
@@ -314,6 +320,8 @@ function App() {
         if (data.type === 'status') {
           setStatus(data.value);
         } else if (data.type === 'message') {
+          if (data.id && seenMsgIdsRef.current.has(data.id)) return;
+          if (data.id) seenMsgIdsRef.current.add(data.id);
           setMessages(prev => [...prev, data]);
           if (!isNearBottomRef.current) setNewMsgCount(c => c + 1);
           const tabMeta = computeMessageTab(data);
@@ -336,7 +344,7 @@ function App() {
               const tabMeta = computeMessageTab(seed);
               if (tabMeta) {
                 ensureTab(tabMeta);
-                setActiveTab(tabMeta.id);
+                changeTab(tabMeta.id);
               }
             } else {
               // Info/publicKey may not have arrived yet; defer tab activation until selfKey is known.
@@ -363,7 +371,9 @@ function App() {
             const firstMsg = container.querySelector('.msg');
             if (firstMsg) anchorRef.current = firstMsg;
           }
-          setMessages(prev => [...data.messages, ...prev]);
+          const newOlder = data.messages.filter(m => !m.id || !seenMsgIdsRef.current.has(m.id));
+          newOlder.forEach(m => { if (m.id) seenMsgIdsRef.current.add(m.id); });
+          setMessages(prev => [...newOlder, ...prev]);
           setHasMore(data.hasMore);
         } else if (data.type === 'peer_suggestion') {
           setPeerSuggestions(prev => {
@@ -415,7 +425,7 @@ function App() {
     const tabMeta = computeMessageTab(seed);
     if (tabMeta) {
       ensureTab(tabMeta);
-      setActiveTab(tabMeta.id);
+      changeTab(tabMeta.id);
     }
   }, [selfKey]);
 
@@ -543,7 +553,7 @@ function App() {
     const tab = buildTabFromParticipants([selfKey, ...(participantIds || [])]);
     if (!tab) return;
     ensureTab(tab);
-    setActiveTab(tab.id);
+    changeTab(tab.id);
   };
 
   const openPeerTab = (peer) => {
@@ -645,7 +655,7 @@ function App() {
             <div key={tab.id} className="tab-wrap">
               <button
                 className={'tab' + (tab.id === activeTab ? ' tab-active' : '') + (tab.ignored ? ' tab-ignored' : '')}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => changeTab(tab.id)}
               >
                 <span className="tab-peer">{tab.label}</span>
               </button>
@@ -858,6 +868,7 @@ export function startWebServer(options: WebServerOptions): void {
     const displayName = formatDisplayName(resolveDisplayName(from, configPeersWithSelf), from);
     const text = compactInlineRefs(extractTextFromPayload(envelope.payload), configPeersWithSelf);
     const msg: Message = { from: displayName, fromKey: from, text, timestamp: envelope.timestamp, to: envelope.to };
+    msg.id = generateMessageId(msg);
     messages.push(msg);
     {
       const lines = messages.map(m => formatMessageLine(m));
@@ -1018,6 +1029,7 @@ export function startWebServer(options: WebServerOptions): void {
           timestamp: Date.now(),
           to: [peerKey],
         };
+        dmMsg.id = generateMessageId(dmMsg);
         messages.push(dmMsg);
         try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
         broadcastToClients({ type: 'message', ...dmMsg });
@@ -1063,6 +1075,7 @@ export function startWebServer(options: WebServerOptions): void {
       timestamp: Date.now(),
       to: [targetPeerKey],
     };
+    dmMsg.id = generateMessageId(dmMsg);
     messages.push(dmMsg);
     try { appendToConversation(dmMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...dmMsg });
@@ -1111,6 +1124,7 @@ export function startWebServer(options: WebServerOptions): void {
       timestamp: Date.now(),
       to: uniqueRecipients,
     };
+    groupMsg.id = generateMessageId(groupMsg);
     messages.push(groupMsg);
     try { appendToConversation(groupMsg, conversationPath, configPeersWithSelf); } catch { /* ignore */ }
     broadcastToClients({ type: 'message', ...groupMsg });

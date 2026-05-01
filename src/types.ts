@@ -13,6 +13,8 @@ export type AgoraConfig = Pick<AgoraConfigLoaded, 'identity' | 'peers'> & {
 };
 
 export interface Message {
+  /** Stable content-derived ID for client-side deduplication. */
+  id?: string;
   from: string;
   /** Sender public key when known; used for deterministic tab routing. */
   fromKey?: string;

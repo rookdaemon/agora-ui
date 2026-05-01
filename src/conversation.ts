@@ -1,10 +1,24 @@
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
+import { createHash } from 'crypto';
 import { getDefaultConfigPath, formatConversationLine, parseConversationLine, shorten, expand } from '@rookdaemon/agora';
 import type { PeerReferenceDirectory } from '@rookdaemon/agora';
 import type { Message } from './types.js';
 
 export const MAX_CONVERSATION_BYTES = 4096;
+
+/**
+ * Derives a stable, content-based ID for a message so the client can
+ * deduplicate across WebSocket reconnects without server-restart drift.
+ * Uses the same inputs whether the message came from the relay or was
+ * reloaded from the conversation file.
+ */
+export function generateMessageId(msg: Pick<Message, 'timestamp' | 'from' | 'fromKey' | 'text'>): string {
+  return createHash('sha256')
+    .update(`${msg.timestamp}:${msg.fromKey ?? msg.from}:${msg.text}`)
+    .digest('hex')
+    .slice(0, 16);
+}
 export const LOAD_MORE_PAGE_SIZE = 20;
 
 /**
@@ -43,13 +57,15 @@ export function parseMessageLine(line: string, directory?: PeerReferenceDirector
   const to = directory
     ? entry.to.map(ref => expand(ref, directory)).filter((v): v is string => Boolean(v))
     : [];
-  return {
+  const msg: Message = {
     from: entry.from,
     fromKey: fromKey || undefined,
     text: entry.text,
     timestamp: entry.timestamp,
     to: to.length > 0 ? to : undefined,
   };
+  msg.id = generateMessageId(msg);
+  return msg;
 }
 
 /**
