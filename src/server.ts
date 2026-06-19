@@ -190,7 +190,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div id="root"></div>
-<script src="/ui.js"></script>
+<script type="module" src="/ui.js"></script>
 </body>
 </html>`;
 
