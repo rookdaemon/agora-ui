@@ -188,7 +188,7 @@ const HTML = `<!DOCTYPE html>
 </head>
 <body>
 <div id="root"></div>
-<script type="text/babel">
+<script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
 
 function formatTime(ts) {
